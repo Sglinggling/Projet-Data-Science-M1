@@ -26,6 +26,12 @@ NUM_FEATURES = [
     "fiber_100g",
 ]
 
+# ── Notebook-facing aliases (01_eda.ipynb imports these names) ────────────────
+# NUTRITIONAL_FEATURES mirrors NUM_FEATURES (post-selection; sodium already dropped).
+# CATEGORICAL_FEATURES is empty — pnns_groups_1 was excluded (95.9 % NaN, see above).
+NUTRITIONAL_FEATURES: list[str] = NUM_FEATURES
+CATEGORICAL_FEATURES: list[str] = []
+
 # ── Columns to load when reading the raw dump ──────────────────────────────────
 USECOLS = [TARGET] + NUM_FEATURES
 
