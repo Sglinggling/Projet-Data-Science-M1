@@ -45,7 +45,29 @@ project/
 └── README.md
 ```
 
-## Run the dashboard
+## Lancer l'application complète (architecture Front / API / Modèle)
+
+L'onglet **Simulation** du dashboard appelle l'API FastAPI pour les prédictions.
+Il faut deux terminaux lancés depuis `project/` :
+
+**Terminal 1 — API (modèle)**
+```bash
+uvicorn src.api:app --port 8000
+```
+
+**Terminal 2 — Dashboard (front)**
+```bash
+streamlit run dashboard/app.py
+```
+
+Le dashboard détecte automatiquement si l'API répond (indicateur vert).
+Si l'API est absente, il bascule en **mode local de secours** et charge le modèle
+directement — la simulation fonctionne dans les deux cas.
+
+L'URL de l'API est configurable via la variable d'environnement `API_URL`
+(défaut : `http://localhost:8000`).
+
+## Run the dashboard seul (sans API)
 
 ```bash
 streamlit run dashboard/app.py
