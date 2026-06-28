@@ -1,22 +1,3 @@
-"""
-Train 5 models and save them to models/.
-
-Anti-leakage guarantee
------------------------
-sklearn models (1–4): build_preprocessor() is embedded in a Pipeline and
-  fitted exclusively on the training fold inside Pipeline.fit().
-MLP (5): a standalone preprocessor is fitted on X_train, then used to
-  transform X_test — test data never influences fitting.
-
-SVM note
---------
-RBF-SVM is O(n²) in memory and O(n³) in time.  At 64 k training rows
-this is prohibitive, so the SVM is trained on a stratified subsample of
-SVM_SUBSAMPLE rows drawn from X_train.  The test set remains the full
-held-out fold so the reported metrics are directly comparable to the
-other models.
-"""
-
 import time
 from pathlib import Path
 

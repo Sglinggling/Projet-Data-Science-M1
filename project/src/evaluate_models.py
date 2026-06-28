@@ -1,23 +1,3 @@
-"""
-Comparative evaluation of the 5 trained models.
-
-Memory strategy
----------------
-Models are loaded, evaluated, and deleted one at a time.  The RF joblib is
-239 MB; keeping it alive while TF allocates its inference context exceeds the
-macOS sandbox RSS limit (~500 MB for background processes) and triggers SIGURG.
-Sequencing avoids that: only one large object lives in RAM at any moment.
-
-Steps
------
-1.  Load each model → predict → classification_report + confusion matrix →
-    store only scalar metrics → del model + gc.collect().
-2.  Comparison DataFrame sorted by f1_macro → CSV + barplot.
-3.  5-fold StratifiedKFold CV on RF / GB / SVM (fresh estimators, not
-    reloaded joblibs — no extra RAM spike).
-4.  Error analysis on Random Forest using the y_pred array saved in step 1.
-"""
-
 import gc
 import warnings
 

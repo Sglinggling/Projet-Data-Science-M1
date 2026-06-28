@@ -1,12 +1,3 @@
-"""
-FastAPI REST service — Nutri-Score classifier.
-
-Run from the project/ directory:
-    uvicorn src.api:app --reload --port 8000
-
-Swagger UI: http://localhost:8000/docs
-"""
-
 import sys
 import warnings
 from contextlib import asynccontextmanager

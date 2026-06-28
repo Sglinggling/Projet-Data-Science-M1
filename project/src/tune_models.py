@@ -1,17 +1,3 @@
-"""
-Hyperparameter tuning via RandomizedSearchCV for Random Forest and Gradient Boosting.
-
-Run from the project/ directory:
-    python -m src.tune_models
-
-Strategy
---------
-- Search on a stratified subsample of 30 000 rows drawn from the train set to limit wall-clock time.
-- After finding the best params, refit a fresh pipeline on the FULL X_train so that the test-set
-  comparison with the default models is apples-to-apples.
-- n_jobs=1 throughout to avoid the SIGURG / fork-safety issue on macOS.
-"""
-
 import time
 from pathlib import Path
 
