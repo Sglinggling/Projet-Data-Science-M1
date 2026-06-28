@@ -1,14 +1,3 @@
-"""
-Data loading, cleaning, encoding, and train/test splitting.
-
-Pipeline design
----------------
-- build_preprocessor() returns a ColumnTransformer that is NOT fitted here.
-  It must be placed INSIDE each model pipeline so that median imputation is
-  computed on training data only (no leakage into the test fold).
-- load_and_clean() handles everything upstream of sklearn: raw I/O, physical
-  bound enforcement, and target encoding.
-"""
 
 import joblib
 import numpy as np

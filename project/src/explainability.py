@@ -1,18 +1,3 @@
-"""
-Explainability analysis for the Random Forest Nutri-Score classifier.
-
-Only the Random Forest pipeline (models/random_forest.joblib) and the
-standalone preprocessor (models/preprocessor.joblib) are loaded — keeping
-peak RAM low on memory-constrained machines (MacBook Air, ~8 GB).
-
-Outputs
--------
-notebooks/figures/feature_importance_rf.png   — native RF importances
-notebooks/figures/permutation_importance.png   — permutation importances
-notebooks/figures/shap_summary.png             — SHAP beeswarm (2 000 rows)
-notebooks/figures/shap_bar.png                 — SHAP global bar chart
-"""
-
 import gc
 
 import joblib

@@ -1,12 +1,3 @@
-"""
-Streamlit decisional dashboard — Nutri-Score classifier.
-
-Run from the project/ directory:
-    streamlit run dashboard/app.py
-
-Models and the raw OFF CSV must already exist (train_models.py must have been run).
-Nothing is retrained here.
-"""
 
 import sys
 from pathlib import Path
