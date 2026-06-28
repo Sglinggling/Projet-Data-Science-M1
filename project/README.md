@@ -67,7 +67,7 @@ curl -L "https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv
 gunzip data/raw/en.openfoodfacts.org.products.csv.gz
 ```
 
-Le fichier décompressé (~9 Go) doit se trouver à `data/raw/en.openfoodfacts.org.products.csv`.
+Le fichier décompressé doit se trouver à `data/raw/en.openfoodfacts.org.products.csv`.
 
 ### 3. Environnement virtuel et dépendances
 
