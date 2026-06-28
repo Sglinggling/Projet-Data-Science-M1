@@ -49,13 +49,10 @@ project/
 
 ### 1. Prérequis
 
-**Python 3.12** est requis. TensorFlow (utilisé pour le MLP) ne supporte pas Python 3.13+.  
-Utiliser [pyenv](https://github.com/pyenv/pyenv) pour gérer la version :
+**Python 3.12.7** est requis. TensorFlow (utilisé pour le MLP) ne supporte pas Python 3.13+.  
+Utiliser [pyenv](https://github.com/pyenv/pyenv) pour installer et utiliser exactement cette version.
 
-```bash
-pyenv install 3.12.9
-pyenv local 3.12.9
-```
+Toutes les commandes ci-dessous s'exécutent depuis le dossier **`project/`**.
 
 ### 2. Télécharger le dataset Open Food Facts
 
@@ -71,12 +68,24 @@ Le fichier décompressé doit se trouver à `data/raw/en.openfoodfacts.org.produ
 
 ### 3. Environnement virtuel et dépendances
 
+Sur les Mac récents, `python -m venv` crée un venv en Python 3.13+ par défaut.
+Appeler le binaire pyenv explicitement garantit Python 3.12.7 :
+
 ```bash
 # Depuis project/
-python -m venv .venv
+pyenv install 3.12.7
+~/.pyenv/versions/3.12.7/bin/python -m venv .venv
 source .venv/bin/activate        # macOS / Linux
 # .venv\Scripts\activate         # Windows
+```
 
+**Vérifiez la version avant de continuer, sinon TensorFlow échouera (pas de wheel pour Python 3.13+).**
+
+```bash
+python --version   # DOIT afficher Python 3.12.7 — sinon supprimez .venv et recommencez
+```
+
+```bash
 pip install -r requirements.txt
 ```
 
@@ -85,15 +94,22 @@ pip install -r requirements.txt
 Ouvrir `notebooks/01_eda.ipynb` dans VS Code, sélectionner le kernel `.venv`, puis
 **Run All**. Le notebook génère les figures dans `notebooks/figures/`.
 
-### 5. Entraîner les modèles *(optionnel — les fichiers `.joblib` sont déjà inclus)*
+### 5. Entraîner les modèles *(OBLIGATOIRE — les fichiers `.joblib` et `models/` sont git-ignorés)*
+
+Les modèles sérialisés ne sont pas inclus dans le dépôt. Cette étape est **obligatoire**
+avant de lancer le dashboard ou l'API. Les scripts génèrent également les figures dans
+`notebooks/figures/` utilisées par le dashboard.
 
 Exécuter dans l'ordre depuis `project/` :
 
 ```bash
-python -m src.train_models       # entraîne et sauvegarde les 5 modèles
-python -m src.evaluate_models    # métriques, matrices de confusion, CV
-python -m src.explainability     # importance des variables, SHAP
-python -m src.tune_models        # optimisation RF et Gradient Boosting (long)
+python -m src.train_models       # génère les .joblib et le preprocessor dans models/
+python -m src.evaluate_models    # génère comparison_results.csv et les matrices de confusion
+python -m src.explainability     # génère les figures SHAP dans notebooks/figures/
+```
+
+```bash
+python -m src.tune_models        # optionnel — optimisation RF et Gradient Boosting (long)
 ```
 
 ### 6. Lancer le dashboard
