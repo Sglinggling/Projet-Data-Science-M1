@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-# ── path bootstrap (works regardless of cwd) ─────────────────────────────────
+# Ajout du répertoire project/ au path pour que `src` soit importable peu importe le cwd
 _HERE = Path(__file__).resolve().parent   # src/
 _ROOT = _HERE.parent                      # project/
 if str(_ROOT) not in sys.path:
@@ -18,13 +18,13 @@ if str(_ROOT) not in sys.path:
 
 from src.config import GRADE_ORDER, INT_TO_LABEL, MODELS_DIR, NUM_FEATURES
 
-# ── Module-level state (populated at startup) ─────────────────────────────────
+# État global chargé au démarrage et partagé entre les requêtes
 _state: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load RF pipeline + label mapping once at startup; release on shutdown."""
+    """Charge le pipeline RF et le label mapping au démarrage ; libère la mémoire à l'arrêt."""
     rf_path  = MODELS_DIR / "random_forest.joblib"
     lm_path  = MODELS_DIR / "label_mapping.joblib"
 
@@ -48,8 +48,6 @@ app = FastAPI(
 )
 
 
-# ── Global exception handler ───────────────────────────────────────────────────
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
@@ -58,13 +56,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# ── Schemas ───────────────────────────────────────────────────────────────────
-
 class NutrientInput(BaseModel):
-    """
-    Nutritional values per 100 g.  All fields ≥ 0.
-    Note: JSON uses Python-safe names (underscores); the model receives the
-    exact column names from config.NUM_FEATURES (including saturated-fat_100g).
+    """Valeurs nutritionnelles pour 100 g.
+
+    Les noms JSON utilisent des underscores (contrainte Pydantic) ;
+    to_dataframe() les reconvertit avec le tiret attendu par le pipeline (saturated-fat_100g).
     """
     energy_100g:        float = Field(..., ge=0, le=3700, description="Énergie (kJ/100g)")
     fat_100g:           float = Field(..., ge=0, le=100,  description="Matières grasses (g/100g)")
@@ -76,11 +72,11 @@ class NutrientInput(BaseModel):
     fiber_100g:         float = Field(..., ge=0, le=100,  description="Fibres (g/100g)")
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Build a 1-row DataFrame with the exact column names expected by the pipeline."""
+        """Construit un DataFrame d'une ligne avec les noms de colonnes exacts attendus par le pipeline."""
         row = {
             "energy_100g":        self.energy_100g,
             "fat_100g":           self.fat_100g,
-            "saturated-fat_100g": self.saturated_fat_100g,  # hyphen — model expects this
+            "saturated-fat_100g": self.saturated_fat_100g,  # tiret requis par le pipeline
             "carbohydrates_100g": self.carbohydrates_100g,
             "sugars_100g":        self.sugars_100g,
             "proteins_100g":      self.proteins_100g,
@@ -96,11 +92,9 @@ class PredictionResponse(BaseModel):
     probabilities: dict[str, float]
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
-
 @app.get("/health", tags=["System"])
 def health():
-    """Liveness check — returns model load status."""
+    """Vérifie que l'API est en vie et que le modèle est bien chargé."""
     return {
         "status": "ok",
         "model":  "random_forest",
@@ -110,12 +104,7 @@ def health():
 
 @app.post("/predict", response_model=PredictionResponse, tags=["Prediction"])
 def predict(payload: NutrientInput):
-    """
-    Predict the Nutri-Score for a food product.
-
-    Returns the predicted grade (a–e), the model's confidence for that grade,
-    and the full probability vector across all 5 classes.
-    """
+    """Prédit le Nutri-Score (a–e), la confiance associée et les probabilités pour les 5 classes."""
     if not _state.get("loaded"):
         return JSONResponse(
             status_code=503,
@@ -146,7 +135,7 @@ def predict(payload: NutrientInput):
 
 @app.get("/model-info", tags=["System"])
 def model_info():
-    """Return metadata about the loaded model and available features."""
+    """Renvoie les métadonnées du modèle chargé (F1-macro, features, classes)."""
     f1_macro = None
     cmp_path = MODELS_DIR / "comparison_results.csv"
     if cmp_path.exists():
