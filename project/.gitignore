@@ -28,3 +28,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Claude Code
+.claude/
+
+# Python version (local pyenv)
+.python-version
