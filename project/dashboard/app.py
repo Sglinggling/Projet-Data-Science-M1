@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-# ── path bootstrap: make `src` importable from any working directory ──────────
+# Ajout de project/ au path pour que `src` soit importable peu importe le répertoire de lancement
 _HERE = Path(__file__).resolve().parent          # project/dashboard/
 _ROOT = _HERE.parent                             # project/
 if str(_ROOT) not in sys.path:
@@ -22,7 +22,7 @@ from sklearn.metrics import confusion_matrix
 
 from src.config import GRADE_ORDER, INT_TO_LABEL, LABEL_TO_INT, MODELS_DIR, NUM_FEATURES, RAW_DIR
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# Paths
 FIGURES_DIR = _ROOT / "notebooks" / "figures"
 
 GRADE_COLORS = {
@@ -76,18 +76,15 @@ FEATURE_BOUNDS = {
 N_PRODUCTS = 61_907
 N_CLASSES   = 5
 
-# ── API configuration ──────────────────────────────────────────────────────────
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
-# Shared Plotly layout defaults for the dark theme
+# Paramètres Plotly communs pour le thème sombre
 _PLOT_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     font=dict(color="#e8eaf0"),
 )
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _load_comparison() -> pd.DataFrame | None:
     p = MODELS_DIR / "comparison_results.csv"
@@ -96,13 +93,11 @@ def _load_comparison() -> pd.DataFrame | None:
     return pd.read_csv(p)
 
 
-# ── Cached data & model loaders ────────────────────────────────────────────────
-
 @st.cache_data(show_spinner="Chargement de l'échantillon de données …")
 def _load_sample(nrows: int = 15_000) -> pd.DataFrame:
-    """
-    Load ~10 k clean rows from the raw OFF dump for interactive charts.
-    nrows=15k to account for rows dropped during quality filtering.
+    """Charge ~10 k lignes nettoyées pour les graphiques interactifs.
+
+    On demande 15 k lignes brutes pour compenser celles supprimées lors du nettoyage.
     """
     from src.preprocessing import load_and_clean
     raw_path = RAW_DIR / "en.openfoodfacts.org.products.csv"
@@ -131,7 +126,7 @@ def _load_label_map() -> dict:
 
 @st.cache_data(ttl=15, show_spinner=False)
 def _api_health() -> bool:
-    """Ping /health; returns True only when API is up AND model is loaded."""
+    """Ping /health ; renvoie True uniquement si l'API répond et que le modèle est chargé."""
     try:
         r = requests.get(f"{API_URL}/health", timeout=2)
         return r.ok and r.json().get("model_loaded", False)
@@ -145,7 +140,7 @@ def _render_prediction_result(
     probabilities: dict,
     model_label: str,
 ) -> None:
-    """Shared display: badge card + probability bar chart."""
+    """Affiche la carte de résultat (badge Nutri-Score + label de confiance) et le barplot des probabilités."""
     pred_color = GRADE_COLORS.get(pred_letter, "#333")
 
     if confidence >= 0.80:
@@ -219,15 +214,12 @@ def _render_prediction_result(
     st.plotly_chart(fig_proba, use_container_width=True)
 
 
-# ── Page config ────────────────────────────────────────────────────────────────
-
 st.set_page_config(
     page_title="Nutri-Score Classifier",
     page_icon="🥗",
     layout="wide",
 )
 
-# ── Global CSS ─────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
@@ -292,8 +284,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Tabs ───────────────────────────────────────────────────────────────────────
-
 tab1, tab2, tab3, tab4 = st.tabs([
     "Vue générale",
     "Analyse des données",
@@ -302,15 +292,14 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+
 # TAB 1 — Vue générale
-# ═══════════════════════════════════════════════════════════════════════════════
 
 with tab1:
     st.title("Nutri-Score Classifier — Open Food Facts")
     st.markdown(
         """
-        > **Pitch métier** — Un fabricant qui conçoit un nouveau produit alimentaire
+        > Un fabricant qui conçoit un nouveau produit alimentaire
         > doit anticiper son Nutri-Score **avant** la mise en marché.
         > Ce tableau de bord prédit le Nutri-Score (A → E) à partir des **8 valeurs
         > nutritionnelles pour 100 g** déclarées sur l'étiquette, en s'appuyant sur
@@ -321,7 +310,6 @@ with tab1:
 
     st.divider()
 
-    # ── KPIs ─────────────────────────────────────────────────────────────────
     df_cmp = _load_comparison()
     best_model = "Random Forest"
     best_f1 = 0.9587
@@ -364,7 +352,6 @@ with tab1:
 
     st.divider()
 
-    # ── Distribution Nutri-Score (Plotly) ─────────────────────────────────────
     st.subheader("Distribution des Nutri-Scores dans le dataset")
     df_s1 = _load_sample()
     grade_counts = (
@@ -387,15 +374,12 @@ with tab1:
     st.plotly_chart(fig_dist, use_container_width=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — Analyse des données (graphiques Plotly interactifs)
-# ═══════════════════════════════════════════════════════════════════════════════
 
 with tab2:
     st.header("Analyse exploratoire des données")
     df_eda = _load_sample()
 
-    # ── 1. Box plot par grade ──────────────────────────────────────────────────
     st.subheader("Distribution d'un nutriment par grade Nutri-Score")
     st.markdown(
         "Chaque nutriment montre un gradient clair A → E. "
@@ -422,7 +406,6 @@ with tab2:
 
     st.divider()
 
-    # ── 2. Heatmap de corrélation ──────────────────────────────────────────────
     st.subheader("Carte de corrélation des nutriments")
     st.markdown(
         "Sucres et glucides sont fortement corrélés (r > 0.7). "
@@ -444,14 +427,11 @@ with tab2:
 
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Comparaison des modèles
-# ═══════════════════════════════════════════════════════════════════════════════
 
 with tab3:
     st.header("Comparaison des modèles entraînés")
 
-    # ── Tableau comparatif ────────────────────────────────────────────────────
     st.subheader("Métriques sur le test set (trié par F1-macro ↓)")
     if df_cmp is not None:
         df_styled = (
@@ -481,7 +461,6 @@ with tab3:
 
     st.divider()
 
-    # ── Barplot comparatif Plotly ─────────────────────────────────────────────
     st.subheader("Comparaison des performances — 4 métriques × modèles")
     if df_cmp is not None:
         metrics = ["accuracy", "precision_macro", "recall_macro", "f1_macro"]
@@ -517,7 +496,6 @@ with tab3:
 
     st.divider()
 
-    # ── Matrice de confusion Plotly ───────────────────────────────────────────
     st.subheader("Matrice de confusion — Random Forest")
     st.markdown(
         "Normalisée par ligne (rappel par classe). "
@@ -550,7 +528,6 @@ with tab3:
 
     st.divider()
 
-    # ── Interprétabilité ──────────────────────────────────────────────────────
     st.subheader("Interprétabilité — importance des nutriments")
 
     col_fi, col_shap = st.columns([1, 1])
@@ -587,7 +564,7 @@ with tab3:
         st.markdown("**SHAP beeswarm** (2 000 échantillons, toutes classes)")
         shap_path = FIGURES_DIR / "shap_summary.png"
         if shap_path.exists():
-            # Affichage contrôlé : largeur fixe, centré, pas pleine page
+            # Encodage base64 pour afficher l'image sans serveur de fichiers statiques
             st.markdown(
                 f'<div style="text-align:center;">'
                 f'<img src="data:image/png;base64,{__import__("base64").b64encode(shap_path.read_bytes()).decode()}"'
@@ -604,15 +581,11 @@ with tab3:
         "cohérent avec l'algorithme officiel Santé Publique France."
     )
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — Simulation  (logique inchangée)
-# ═══════════════════════════════════════════════════════════════════════════════
 
 with tab4:
     st.header("Simulation — prédire le Nutri-Score d'un produit")
 
-    # ── API status indicator ──────────────────────────────────────────────────
     api_ok = _api_health()
     if api_ok:
         st.markdown(
@@ -633,7 +606,6 @@ with tab4:
            else " *(mode local — choisissez un modèle ci-dessous)* et cliquez sur **Prédire**.")
     )
 
-    # ── Saisie des nutriments ─────────────────────────────────────────────────
     st.subheader("Composition nutritionnelle (pour 100 g)")
 
     col_a, col_b = st.columns(2)
@@ -668,7 +640,6 @@ with tab4:
 
     st.divider()
 
-    # ── Sélection du modèle (local fallback uniquement) ───────────────────────
     st.subheader("Modèle de prédiction")
     if api_ok:
         st.markdown(
@@ -685,12 +656,10 @@ with tab4:
         )
         model_key = SKLEARN_MODELS[model_choice]
 
-    # ── Bouton de prédiction ──────────────────────────────────────────────────
     if st.button("Prédire le Nutri-Score", type="primary", use_container_width=True):
         with st.spinner("Prédiction en cours …"):
 
             if api_ok:
-                # ── Chemin API ────────────────────────────────────────────────
                 payload = {
                     "energy_100g":        feature_values["energy_100g"],
                     "fat_100g":           feature_values["fat_100g"],
@@ -723,7 +692,7 @@ with tab4:
                     )
 
             else:
-                # ── Chemin local de secours ───────────────────────────────────
+                # Mode local de secours : on charge le pipeline directement sans passer par l'API
                 pipe = _load_sklearn_pipeline(model_key)
                 if pipe is None:
                     st.error(
@@ -749,7 +718,6 @@ with tab4:
                         model_label=f"{model_choice} (mode local)",
                     )
 
-# ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown(
     '<div class="app-footer">'
     'Projet Data Science M1 &nbsp;&middot;&nbsp; Samy HALIT &amp; Ananda CASSINI'

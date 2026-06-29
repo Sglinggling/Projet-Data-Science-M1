@@ -38,7 +38,6 @@ from src.preprocessing import (
     load_and_clean,
 )
 
-# ── Constants ──────────────────────────────────────────────────────────────────
 FIGURES_DIR = ROOT / "notebooks" / "figures"
 RAW_PATH = RAW_DIR / "en.openfoodfacts.org.products.csv"
 CLASS_LABELS = ["a", "b", "c", "d", "e"]
@@ -54,9 +53,8 @@ DISPLAY = {
 }
 
 
-# ── Confusion-matrix heatmap ───────────────────────────────────────────────────
-
 def _plot_confmat(y_true, y_pred, model_key: str) -> None:
+    """Génère et sauvegarde la matrice de confusion normalisée par ligne (% par vraie classe)."""
     cm = confusion_matrix(y_true, y_pred)
     cm_pct = cm.astype(float) / cm.sum(axis=1, keepdims=True) * 100
 
@@ -88,9 +86,8 @@ def _plot_confmat(y_true, y_pred, model_key: str) -> None:
     print(f"  → confmat saved: notebooks/figures/confmat_{model_key}.png", flush=True)
 
 
-# ── Per-model eval (returns only scalars) ─────────────────────────────────────
-
 def _evaluate_one(key: str, y_true, y_pred) -> dict:
+    """Affiche le rapport de classification, trace la confusion matrix et renvoie les métriques scalaires."""
     print(f"\n{'─' * 60}", flush=True)
     print(f"  {DISPLAY[key]}", flush=True)
     print(f"{'─' * 60}", flush=True)
@@ -110,9 +107,8 @@ def _evaluate_one(key: str, y_true, y_pred) -> dict:
     }
 
 
-# ── Comparison barplot ─────────────────────────────────────────────────────────
-
 def _plot_comparison(df: pd.DataFrame) -> None:
+    """Barplot groupé comparant accuracy, précision, recall et F1-macro pour tous les modèles."""
     metrics = ["accuracy", "precision_macro", "recall_macro", "f1_macro"]
     labels = {
         "accuracy":        "Accuracy",
@@ -150,9 +146,8 @@ def _plot_comparison(df: pd.DataFrame) -> None:
     print(f"\nComparison barplot saved → notebooks/figures/model_comparison.png", flush=True)
 
 
-# ── Cross-validation ───────────────────────────────────────────────────────────
-
 def _cv_rf_gb(X_train: pd.DataFrame, y_train: pd.Series) -> None:
+    """Validation croisée stratifiée (5 folds) pour Random Forest et Gradient Boosting."""
     skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
     configs = [
         (
@@ -183,6 +178,7 @@ def _cv_rf_gb(X_train: pd.DataFrame, y_train: pd.Series) -> None:
 
 
 def _cv_svm_subsampled(X_train: pd.DataFrame, y_train: pd.Series) -> None:
+    """CV manuelle pour le SVM : chaque fold est sous-échantillonné à 15 k lignes pour rester raisonnable."""
     skf = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
     X_r = X_train.reset_index(drop=True)
     y_r = y_train.reset_index(drop=True)
@@ -214,9 +210,8 @@ def _cv_svm_subsampled(X_train: pd.DataFrame, y_train: pd.Series) -> None:
     print(f"  {'SVM RBF (subsample=15k)':<42}  {arr.mean():.4f} ± {arr.std():.4f}", flush=True)
 
 
-# ── Error analysis ─────────────────────────────────────────────────────────────
-
 def _error_analysis_rf(y_true, y_pred_rf: np.ndarray) -> None:
+    """Identifie les deux paires de grades les plus souvent confondues par le Random Forest."""
     cm = confusion_matrix(y_true, y_pred_rf)
     np.fill_diagonal(cm, 0)
 
@@ -244,8 +239,6 @@ def _error_analysis_rf(y_true, y_pred_rf: np.ndarray) -> None:
     )
 
 
-# ── Orchestrator ───────────────────────────────────────────────────────────────
-
 def main() -> pd.DataFrame:
     print("=" * 60, flush=True)
     print("Loading data …", flush=True)
@@ -259,7 +252,7 @@ def main() -> pd.DataFrame:
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── sklearn models: one at a time ─────────────────────────────────────────
+    # Modèles sklearn évalués un par un pour libérer la RAM entre chaque
     for key in ["logreg", "random_forest", "gradient_boosting", "svm"]:
         print(f"\n[sklearn] Loading {DISPLAY[key]} …", flush=True)
         try:
@@ -275,11 +268,10 @@ def main() -> pd.DataFrame:
             gc.collect()
             print(f"  [freed {key} from RAM]", flush=True)
 
-    # ── MLP: weights extracted once, then TF released; inference in pure numpy ─
-    # mlp.predict() triggers TF's execution engine which is killed by the macOS
-    # sandbox (SIGURG / exit 144) when residual sklearn memory is still mapped.
-    # Solution: pull Dense weights → del Keras model → forward-pass in numpy.
-    # Dropout has rate 0 at inference, so the math is: relu(X@W+b) per layer.
+    # MLP : on extrait les poids Dense puis on détruit le modèle Keras avant l'inférence.
+    # mlp.predict() déclenche le moteur TF qui est tué par le sandbox macOS (SIGURG / exit 144)
+    # quand de la mémoire sklearn est encore mappée. Solution : forward-pass en numpy pur.
+    # Le Dropout est inactif à l'inférence donc le calcul est simplement relu(X@W+b) par couche.
     print(f"\n[Keras] Loading MLP …", flush=True)
     try:
         pre = joblib.load(MODELS_DIR / "preprocessor.joblib")
@@ -290,7 +282,7 @@ def main() -> pd.DataFrame:
         mlp = tf.keras.models.load_model(MODELS_DIR / "mlp.keras")
         print("  MLP model loaded.", flush=True)
 
-        # Extract Dense layer weights (skip Input and Dropout layers)
+        # On ne garde que les couches Dense (Input et Dropout sont ignorés)
         dense_weights = [
             layer.get_weights()
             for layer in mlp.layers
@@ -306,7 +298,7 @@ def main() -> pd.DataFrame:
         del pre
         gc.collect()
 
-        # Numpy forward pass (dropout disabled at inference)
+        # Forward pass numpy — le Dropout est désactivé à l'inférence
         def _relu(z: np.ndarray) -> np.ndarray:
             return np.maximum(0.0, z)
 
@@ -331,7 +323,6 @@ def main() -> pd.DataFrame:
         print(f"  ERROR evaluating MLP: {exc}", flush=True)
         import traceback; traceback.print_exc()
 
-    # ── comparison table ───────────────────────────────────────────────────────
     df = (
         pd.DataFrame(rows)
         .sort_values("f1_macro", ascending=False)
@@ -344,13 +335,11 @@ def main() -> pd.DataFrame:
 
     _plot_comparison(df)
 
-    # ── final summary table ────────────────────────────────────────────────────
     print(f"\n{'=' * 60}", flush=True)
     print("FINAL COMPARISON — test set (sorted by F1-macro ↓)", flush=True)
     print(f"{'=' * 60}", flush=True)
     print(df_out.to_string(index=False, float_format=lambda x: f"{x:.4f}"), flush=True)
 
-    # ── cross-validation (fresh estimators) ───────────────────────────────────
     print(f"\n{'=' * 60}", flush=True)
     print(f"CROSS-VALIDATION ({CV_FOLDS} folds, StratifiedKFold) — f1_macro", flush=True)
     print(f"  (RF uses 100 trees for speed; SVM subsampled to 15k/fold)", flush=True)
@@ -358,7 +347,6 @@ def main() -> pd.DataFrame:
     _cv_rf_gb(X_train, y_train)
     _cv_svm_subsampled(X_train, y_train)
 
-    # ── error analysis on Random Forest ───────────────────────────────────────
     if y_pred_rf is not None:
         _error_analysis_rf(y_test, y_pred_rf)
     else:

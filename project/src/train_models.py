@@ -32,13 +32,10 @@ from src.preprocessing import (
     save_label_mapping,
 )
 
-# ── Constants ──────────────────────────────────────────────────────────────────
-SVM_SUBSAMPLE = 15_000
+SVM_SUBSAMPLE = 15_000  # le SVM est trop lent sur l'intégralité du train set
 FIGURES_DIR = ROOT / "notebooks" / "figures"
 RAW_PATH = RAW_DIR / "en.openfoodfacts.org.products.csv"
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _recap(name: str, y_true, y_pred, elapsed: float) -> dict:
     acc = accuracy_score(y_true, y_pred)
@@ -50,8 +47,6 @@ def _recap(name: str, y_true, y_pred, elapsed: float) -> dict:
     return {"model": name, "accuracy": acc, "f1_macro": f1, "train_time_s": round(elapsed, 1)}
 
 
-# ── sklearn model trainer ──────────────────────────────────────────────────────
-
 def train_sklearn(
     name: str,
     clf,
@@ -61,14 +56,10 @@ def train_sklearn(
     y_test,
     subsample: int | None = None,
 ) -> dict:
-    """
-    Wrap clf in Pipeline([preprocessor, clf]), fit, save, and return metrics.
+    """Entraîne clf dans un Pipeline (préprocesseur + clf), sauvegarde le .joblib et renvoie les métriques.
 
-    Parameters
-    ----------
-    subsample : int | None
-        If set AND len(X_train) > subsample, fit on a stratified draw of
-        that many rows.  The full X_test is always used for evaluation.
+    Si subsample est fourni, l'entraînement porte sur un sous-ensemble stratifié de cette taille ;
+    l'évaluation utilise toujours le test set complet.
     """
     pipe = Pipeline([("pre", build_preprocessor()), ("clf", clf)])
 
@@ -93,18 +84,10 @@ def train_sklearn(
     return _recap(name, y_test, pipe.predict(X_test), elapsed)
 
 
-# ── MLP (Keras) trainer ────────────────────────────────────────────────────────
-
 def train_mlp(X_train, y_train, X_test, y_test) -> dict:
-    """
-    Fit the preprocessor on X_train only, then train a Keras MLP.
-    Saves:
-      - models/mlp.keras
-      - models/preprocessor.joblib  (reused by evaluate_models and dashboard)
-      - notebooks/figures/mlp_history.png
+    """Entraîne un MLP Keras et sauvegarde le modèle, le préprocesseur et les courbes d'entraînement.
 
-    Requires TensorFlow ≤ Python 3.12 (TF has no 3.13/3.14 wheel yet).
-    Install via: pip install tensorflow  (in a Python 3.11/3.12 env)
+    Nécessite TensorFlow (Python 3.11/3.12 uniquement — pas de wheel pour 3.13+).
     """
     if not _TF_AVAILABLE:
         raise RuntimeError(
@@ -115,7 +98,7 @@ def train_mlp(X_train, y_train, X_test, y_test) -> dict:
             "  pip install tensorflow"
         )
 
-    # ── preprocess (fit on train only) ────────────────────────────────────────
+    # Fit du préprocesseur sur le train uniquement — évite toute fuite de données
     pre = build_preprocessor()
     X_tr = pre.fit_transform(X_train, y_train)
     X_te = pre.transform(X_test)
@@ -124,12 +107,11 @@ def train_mlp(X_train, y_train, X_test, y_test) -> dict:
     joblib.dump(pre, MODELS_DIR / "preprocessor.joblib")
     print("  Preprocessor saved → models/preprocessor.joblib")
 
-    # ── class weights (balanced) ──────────────────────────────────────────────
+    # Poids de classe pour compenser le déséquilibre des grades
     classes = np.unique(y_train)
     weights = compute_class_weight("balanced", classes=classes, y=np.asarray(y_train))
     class_weight_dict = dict(zip(classes.tolist(), weights.tolist()))
 
-    # ── architecture ──────────────────────────────────────────────────────────
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(X_tr.shape[1],)),
         tf.keras.layers.Dense(128, activation="relu"),
@@ -161,11 +143,10 @@ def train_mlp(X_train, y_train, X_test, y_test) -> dict:
     )
     elapsed = time.perf_counter() - t0
 
-    # ── save model ────────────────────────────────────────────────────────────
     model.save(MODELS_DIR / "mlp.keras")
     print("  Saved → models/mlp.keras")
 
-    # ── training curves ───────────────────────────────────────────────────────
+    # Courbes d'entraînement (loss et accuracy par epoch)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
@@ -194,12 +175,9 @@ def train_mlp(X_train, y_train, X_test, y_test) -> dict:
     plt.close()
     print(f"  Training curves saved → {out_path}")
 
-    # ── eval ──────────────────────────────────────────────────────────────────
     y_pred = np.argmax(model.predict(X_te, verbose=0), axis=1)
     return _recap("MLP (Keras)", y_test, y_pred, elapsed)
 
-
-# ── Orchestrator ───────────────────────────────────────────────────────────────
 
 def main() -> list[dict]:
     print("=" * 54)
@@ -212,7 +190,6 @@ def main() -> list[dict]:
 
     results: list[dict] = []
 
-    # 1 ── Logistic Regression (baseline)
     print("\n[1/5] Logistic Regression (baseline) …")
     results.append(train_sklearn(
         "logreg",
@@ -224,7 +201,6 @@ def main() -> list[dict]:
         X_train, y_train, X_test, y_test,
     ))
 
-    # 2 ── Random Forest
     print("\n[2/5] Random Forest …")
     results.append(train_sklearn(
         "random_forest",
@@ -237,7 +213,7 @@ def main() -> list[dict]:
         X_train, y_train, X_test, y_test,
     ))
 
-    # 3 ── Gradient Boosting (no native class_weight — acceptable, see docstring)
+    # GradientBoosting n'a pas de class_weight natif — acceptable pour ce dataset
     print("\n[3/5] Gradient Boosting …")
     results.append(train_sklearn(
         "gradient_boosting",
@@ -245,7 +221,6 @@ def main() -> list[dict]:
         X_train, y_train, X_test, y_test,
     ))
 
-    # 4 ── SVM — trained on SVM_SUBSAMPLE rows, evaluated on full test set
     print(f"\n[4/5] SVM RBF (subsample ≤ {SVM_SUBSAMPLE}, full test set) …")
     results.append(train_sklearn(
         "svm",
@@ -259,11 +234,9 @@ def main() -> list[dict]:
         subsample=SVM_SUBSAMPLE,
     ))
 
-    # 5 ── MLP (Keras)
     print("\n[5/5] MLP (Keras) …")
     results.append(train_mlp(X_train, y_train, X_test, y_test))
 
-    # ── Summary table ─────────────────────────────────────────────────────────
     print("\n" + "=" * 54)
     print("SUMMARY — quick eval on held-out test set")
     print("=" * 54)

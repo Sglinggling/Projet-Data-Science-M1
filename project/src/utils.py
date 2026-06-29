@@ -3,6 +3,7 @@ import pandas as pd
 
 
 def load_off(path: str, usecols: list[str], nrows: int | None = None) -> pd.DataFrame:
+    """Charge le fichier TSV Open Food Facts en ne lisant que les colonnes utiles."""
     return pd.read_csv(
         path,
         sep="\t",

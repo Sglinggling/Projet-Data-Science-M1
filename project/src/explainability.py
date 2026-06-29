@@ -17,12 +17,11 @@ from src.config import (
 )
 from src.preprocessing import get_train_test, load_and_clean
 
-# ── Constants ──────────────────────────────────────────────────────────────────
 FIGURES_DIR = ROOT / "notebooks" / "figures"
 RAW_PATH = RAW_DIR / "en.openfoodfacts.org.products.csv"
-SHAP_SAMPLE = 2_000
+SHAP_SAMPLE = 2_000  # calculer SHAP sur tout le test set serait trop long
 
-# Short display names for plots
+# Noms courts pour les graphiques
 FEATURE_LABELS = {
     "energy_100g":        "Energy",
     "fat_100g":           "Fat",
@@ -36,8 +35,6 @@ FEATURE_LABELS = {
 LABELS = [FEATURE_LABELS[f] for f in NUM_FEATURES]
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
 def _savefig(name: str) -> None:
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     path = FIGURES_DIR / name
@@ -46,10 +43,8 @@ def _savefig(name: str) -> None:
     print(f"  Saved → notebooks/figures/{name}", flush=True)
 
 
-# ── 1. Native feature importance ───────────────────────────────────────────────
-
 def plot_feature_importance(rf_clf, feature_names: list[str]) -> np.ndarray:
-    """Bar chart of RF mean impurity decrease (Gini importance)."""
+    """Barplot de l'importance native du RF (diminution moyenne de l'impureté Gini)."""
     print("\n[1/3] Native feature importance …", flush=True)
 
     importances = rf_clf.feature_importances_
@@ -73,10 +68,8 @@ def plot_feature_importance(rf_clf, feature_names: list[str]) -> np.ndarray:
     return importances
 
 
-# ── 2. Permutation importance ──────────────────────────────────────────────────
-
 def plot_permutation_importance(pipe, X_test: pd.DataFrame, y_test: pd.Series) -> np.ndarray:
-    """Permutation importance with error bars (n_repeats=10, f1_macro)."""
+    """Importance par permutation avec barres d'erreur (10 répétitions, score f1_macro)."""
     print("\n[2/3] Permutation importance (n_repeats=10, f1_macro) …", flush=True)
     print("  This may take ~1–2 min …", flush=True)
 
@@ -86,7 +79,7 @@ def plot_permutation_importance(pipe, X_test: pd.DataFrame, y_test: pd.Series) -
         y_test,
         scoring="f1_macro",
         n_repeats=10,
-        n_jobs=1,          # n_jobs=-1 spawns subprocesses → SIGURG on macOS sandbox
+        n_jobs=1,          # n_jobs=-1 crée des sous-processus → SIGURG sur le sandbox macOS
         random_state=RANDOM_STATE,
     )
 
@@ -116,15 +109,11 @@ def plot_permutation_importance(pipe, X_test: pd.DataFrame, y_test: pd.Series) -
     return means
 
 
-# ── 3. SHAP ────────────────────────────────────────────────────────────────────
-
 def plot_shap(rf_clf, X_test_scaled: np.ndarray, feature_names: list[str]) -> np.ndarray:
-    """
-    SHAP TreeExplainer on a 2 000-row subsample of the (already scaled) test set.
+    """SHAP TreeExplainer sur 2 000 lignes du test set (déjà normalisées).
 
-    SHAP 0.52 TreeExplainer for multiclass RF returns shap_values of shape
-    (n_samples, n_features, n_classes).  We aggregate |values| over classes
-    for a single global importance ranking.
+    Le TreeExplainer renvoie des valeurs de forme (n, features, classes) pour un RF multiclasse.
+    On agrège |SHAP| sur les classes pour obtenir un classement global unique.
     """
     print(f"\n[3/3] SHAP TreeExplainer (sample={SHAP_SAMPLE}) …", flush=True)
 
@@ -136,11 +125,9 @@ def plot_shap(rf_clf, X_test_scaled: np.ndarray, feature_names: list[str]) -> np
     print("  Computing SHAP values …", flush=True)
     shap_values = explainer.shap_values(X_sample)
 
-    # ── normalise shape ────────────────────────────────────────────────────────
-    # Depending on SHAP version/RF type, shap_values can be:
-    #   list of (n, p) arrays of length n_classes   → stack to (n, p, C)
-    #   ndarray (n, p, C)
-    #   ndarray (n, p)  (binary or already aggregated)
+    # Selon la version de SHAP/type de RF, shap_values peut être :
+    #   liste de tableaux (n, p) de longueur n_classes → on stack en (n, p, C)
+    #   ndarray (n, p, C) ou (n, p) si déjà agrégé
     if isinstance(shap_values, list):
         sv = np.stack(shap_values, axis=-1)          # (n, p, C)
     else:
@@ -148,10 +135,9 @@ def plot_shap(rf_clf, X_test_scaled: np.ndarray, feature_names: list[str]) -> np
         if sv.ndim == 2:
             sv = sv[:, :, np.newaxis]                # (n, p, 1)
 
-    # mean |SHAP| over classes → (n, p)
+    # Moyenne de |SHAP| sur les classes → (n, p)
     sv_agg = np.abs(sv).mean(axis=-1)
 
-    # ── beeswarm (summary plot) ───────────────────────────────────────────────
     print("  Plotting beeswarm …", flush=True)
     shap.summary_plot(
         sv_agg,
@@ -164,7 +150,6 @@ def plot_shap(rf_clf, X_test_scaled: np.ndarray, feature_names: list[str]) -> np
     plt.tight_layout()
     _savefig("shap_summary.png")
 
-    # ── global bar chart ──────────────────────────────────────────────────────
     print("  Plotting SHAP bar chart …", flush=True)
     mean_abs = sv_agg.mean(axis=0)          # (p,)
     order = np.argsort(mean_abs)
@@ -186,8 +171,6 @@ def plot_shap(rf_clf, X_test_scaled: np.ndarray, feature_names: list[str]) -> np
     print(f"  Top 3 (SHAP): {top3}", flush=True)
     return mean_abs
 
-
-# ── Synthesis ──────────────────────────────────────────────────────────────────
 
 def print_synthesis(
     native_imp: np.ndarray,
@@ -233,8 +216,6 @@ def print_synthesis(
     print(f"{'=' * 60}", flush=True)
 
 
-# ── Orchestrator ───────────────────────────────────────────────────────────────
-
 def main() -> None:
     print("=" * 60, flush=True)
     print("Loading data …", flush=True)
@@ -243,32 +224,23 @@ def main() -> None:
     print(f"Test set : {X_test.shape}", flush=True)
     print("=" * 60, flush=True)
 
-    # ── load only RF pipeline + standalone preprocessor ───────────────────────
     print("\nLoading Random Forest pipeline …", flush=True)
     pipe = joblib.load(MODELS_DIR / "random_forest.joblib")
     print("  RF pipeline loaded.", flush=True)
 
-    # Isolate the fitted classifier and preprocessor from the pipeline
+    # On extrait le classifieur et le préprocesseur du pipeline pour les utiliser séparément
     rf_clf = pipe.named_steps["clf"]
     pre    = pipe.named_steps["pre"]
 
-    # Scale test data once (needed for permutation importance + SHAP)
+    # Test set normalisé une seule fois — réutilisé par la permutation et SHAP
     X_test_scaled = pre.transform(X_test)
     print(f"  X_test scaled : {X_test_scaled.shape}", flush=True)
 
-    # ── 1. Native importance ──────────────────────────────────────────────────
     native_imp = plot_feature_importance(rf_clf, LABELS)
-
-    # ── 2. Permutation importance (on the full pipeline) ──────────────────────
     perm_imp = plot_permutation_importance(pipe, X_test, y_test)
-
-    # ── 3. SHAP ───────────────────────────────────────────────────────────────
     shap_imp = plot_shap(rf_clf, X_test_scaled, LABELS)
-
-    # ── 4. Synthesis ──────────────────────────────────────────────────────────
     print_synthesis(native_imp, perm_imp, shap_imp, LABELS)
 
-    # Free RF from memory
     del pipe, rf_clf, pre, X_test_scaled
     gc.collect()
     print("\nDone. All figures saved to notebooks/figures/.", flush=True)

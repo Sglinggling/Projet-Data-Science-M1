@@ -22,59 +22,37 @@ from src.config import (
 from src.utils import load_off
 
 
-# ── 1. Load & clean ────────────────────────────────────────────────────────────
-
 def load_and_clean(
     path,
     nrows: int | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Read the raw OFF dump, apply quality filters, and return (X, y).
+    """Charge le dump OFF, filtre les grades invalides et encode la cible en entier (0–4).
 
-    Steps
-    -----
-    1. Load only USECOLS from the TSV.
-    2. Keep rows where the target is a valid Nutri-Score grade {a,b,c,d,e}.
-    3. Enforce physical bounds per column: values outside [lo, hi] → NaN.
-       Rows are NOT dropped — downstream imputation handles the NaNs.
-    4. Encode the target as integers 0–4 (a=0 … e=4).
-
-    Returns
-    -------
-    X : pd.DataFrame  shape (n, 8)  — raw numerics, may contain NaN
-    y : pd.Series     shape (n,)    — integer labels 0–4
+    Les valeurs hors bornes physiques deviennent NaN — elles ne sont pas supprimées,
+    l'imputation s'en occupe en aval.
     """
     df = load_off(path, usecols=USECOLS, nrows=nrows)
 
-    # ── target cleaning ────────────────────────────────────────────────────────
     df[TARGET] = df[TARGET].str.strip().str.lower()
     df = df[df[TARGET].isin(GRADE_ORDER)].copy()
 
-    # ── physical bounds: out-of-range values become NaN ───────────────────────
+    # Valeurs hors plage physique → NaN (les lignes sont conservées)
     for col, (lo, hi) in PHYSICAL_BOUNDS.items():
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
             df[col] = df[col].where(df[col].between(lo, hi, inclusive="both"))
 
-    # ── target encoding ────────────────────────────────────────────────────────
     y = df[TARGET].map(LABEL_TO_INT).astype(np.int8)
     X = df[NUM_FEATURES].copy()
 
     return X, y
 
 
-# ── 2. Preprocessor (unfitted) ─────────────────────────────────────────────────
-
 def build_preprocessor() -> ColumnTransformer:
-    """
-    Return an unfitted ColumnTransformer.
+    """Renvoie un ColumnTransformer non entraîné : imputation médiane puis standardisation.
 
-    Numeric pipeline
-    ----------------
-    SimpleImputer(strategy="median") → StandardScaler
-
-    The median is computed per training fold only — call this inside a
-    sklearn Pipeline to avoid leakage.
+    À instancier à l'intérieur d'un Pipeline sklearn pour éviter toute fuite de données
+    (la médiane est calculée uniquement sur le fold d'entraînement).
     """
     numeric_pipeline = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
@@ -90,17 +68,12 @@ def build_preprocessor() -> ColumnTransformer:
     )
 
 
-# ── 3. Train / test split ──────────────────────────────────────────────────────
-
 def get_train_test(
     X: pd.DataFrame,
     y: pd.Series,
     test_size: float = 0.2,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-    """
-    Stratified split.  The preprocessor is intentionally NOT applied here;
-    fit it inside each model's Pipeline on X_train only.
-    """
+    """Découpe stratifiée train/test. Le préprocesseur n'est pas appliqué ici."""
     return train_test_split(
         X, y,
         test_size=test_size,
@@ -109,10 +82,8 @@ def get_train_test(
     )
 
 
-# ── 4. Persist label mapping ───────────────────────────────────────────────────
-
 def save_label_mapping() -> None:
-    """Dump INT_TO_LABEL and LABEL_TO_INT to models/ for the dashboard."""
+    """Sauvegarde la correspondance entier ↔ grade dans models/ pour le dashboard."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(
         {"int_to_label": INT_TO_LABEL, "label_to_int": LABEL_TO_INT},
@@ -120,7 +91,6 @@ def save_label_mapping() -> None:
     )
 
 
-# ── Entrypoint ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     from src.config import RAW_DIR, SAMPLE_SIZE
