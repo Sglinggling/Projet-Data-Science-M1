@@ -1,0 +1,36 @@
+# Data (raw dumps and processed files – never commit)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Models
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.keras
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+
+# Python version (local pyenv)
+.python-version
