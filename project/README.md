@@ -3,8 +3,17 @@
 Prédiction automatique du Nutri-Score (A à E) d'un produit alimentaire à partir de ses valeurs
 nutritionnelles pour 100 g, sur la base du jeu de données Open Food Facts (80 000 produits).
 
-Projet réalisé dans le cadre du M1 Data Science – EFREI Paris.  
-**Candidats :** Samy HALIT & Ananda CASSINI
+Projet réalisé en binôme dans le cadre du M1 Data Science – EFREI Paris.  
+**Candidats :** Samy HALIT ([@Sglinggling](https://github.com/Sglinggling)) & Ananda CASSINI ([@ananda3cassini](https://github.com/ananda3cassini))
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.12.7-3776AB?style=flat&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Streamlit-1.40+-FF4B4B?style=flat&logo=streamlit&logoColor=white" alt="Streamlit">
+  <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/scikit--learn-1.5+-F7931E?style=flat&logo=scikit-learn&logoColor=white" alt="Scikit-Learn">
+  <img src="https://img.shields.io/badge/TensorFlow-2.17-FF6F00?style=flat&logo=tensorflow&logoColor=white" alt="TensorFlow">
+  <img src="https://img.shields.io/github/contributors/Sglinggling/Projet-Data-Science-M1?color=blue" alt="Contributors">
+</p>
 
 ---
 
@@ -41,6 +50,49 @@ project/
 │   └── app.py        # dashboard Streamlit interactif
 ├── requirements.txt
 └── README.md
+```
+
+---
+
+## Architecture du Projet
+
+```mermaid
+flowchart TB
+    subgraph Client [Interface Utilisateur]
+        Streamlit[Dashboard Streamlit\ndashboard/app.py]
+    end
+
+    subgraph API [Couche Service API REST]
+        FastAPI[FastAPI\nsrc/api.py]
+    end
+
+    subgraph Pipeline [Modèle & Pipeline de Prédiction]
+        Preprocessor[Préprocesseur\nStandardScaler / SimpleImputer]
+        RandomForest[Classifieur Random Forest\nrf_tuned.joblib]
+    end
+
+    subgraph MachineLearning [Entraînement des Modèles - Offline]
+        TrainModels[Entraînement\nsrc/train_models.py]
+        TuneModels[Optimisation Hyperparamètres\nsrc/tune_models.py]
+        EvalModels[Évaluation\nsrc/evaluate_models.py]
+        Explainability[Explicabilité SHAP/Gini\nsrc/explainability.py]
+        Dataset[Dataset Open Food Facts\ndata/raw/products.csv]
+    end
+
+    %% Interactions Temps Réel
+    Streamlit -- "Saisie utilisateur" --> Streamlit
+    Streamlit -- "1. Requête POST /predict" --> FastAPI
+    FastAPI -- "2. Normalisation" --> Preprocessor
+    Preprocessor -- "3. Valeurs préparées" --> RandomForest
+    RandomForest -- "4. Prédiction du grade (A-E)" --> FastAPI
+    FastAPI -- "5. Réponse JSON" --> Streamlit
+
+    %% Flux hors-ligne
+    Dataset --> TrainModels
+    TrainModels --> Preprocessor & RandomForest
+    TrainModels --> EvalModels
+    TuneModels --> RandomForest
+    EvalModels --> Explainability
 ```
 
 ---

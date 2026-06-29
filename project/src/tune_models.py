@@ -12,12 +12,15 @@ from sklearn.pipeline import Pipeline
 from src.config import MODELS_DIR, RANDOM_STATE, RAW_DIR, SAMPLE_SIZE
 from src.preprocessing import build_preprocessor, get_train_test, load_and_clean
 
+# Constants
 RAW_PATH        = RAW_DIR / "en.openfoodfacts.org.products.csv"
-TUNE_SUBSAMPLE  = 30_000   # lignes du train set utilisées pour la recherche aléatoire
+TUNE_SUBSAMPLE  = 30_000   # les lignes de train utilisées pour le tuning (RandomizedSearchCV)
 N_ITER          = 15
 CV_FOLDS        = 3
 SCORING         = "f1_macro"
-DEFAULT_RF_F1   = 0.9587   # baseline issu de train_models.py, sert de référence
+DEFAULT_RF_F1   = 0.9587   # baseline de train_models.py
+
+# Distributions des paramètres 
 
 RF_PARAM_DIST = {
     "clf__n_estimators":     [100, 200, 300],
@@ -34,6 +37,8 @@ GB_PARAM_DIST = {
 }
 
 
+# Helpers
+
 def _header(text: str) -> None:
     bar = "═" * 60
     print(f"\n{bar}", flush=True)
@@ -42,7 +47,7 @@ def _header(text: str) -> None:
 
 
 def _subsample_train(X_train, y_train, n: int):
-    """Sous-échantillon stratifié de n lignes du train set pour accélérer la recherche."""
+    """Stratified subsample of n rows from the train set."""
     X_sub, _, y_sub, _ = train_test_split(
         X_train, y_train,
         train_size=n,
@@ -61,7 +66,10 @@ def tune_model(
     X_test, y_test,
     save_key: str,
 ) -> dict:
-    """Recherche aléatoire sur X_sub, puis réentraînement du meilleur pipeline sur le train complet."""
+    """
+    Run RandomizedSearchCV on X_sub/y_sub, then refit the best pipeline on
+    the full X_train and evaluate on X_test.
+    """
     pipe = Pipeline([("pre", build_preprocessor()), ("clf", base_clf)])
     cv   = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
 
@@ -72,7 +80,7 @@ def tune_model(
         scoring=SCORING,
         cv=cv,
         n_jobs=1,
-        refit=False,   # we refit manually on full X_train below
+        refit=False,
         verbose=1,
         random_state=RANDOM_STATE,
         error_score="raise",
@@ -83,16 +91,17 @@ def tune_model(
     search.fit(X_sub, y_sub)
     search_time = time.perf_counter() - t0
 
-    best_params_raw = search.best_params_
+    best_params_raw = search.best_params_          # e.x {"clf__n_estimators": 200, …}
     best_cv_score   = round(search.best_score_, 4)
 
-    # On retire le préfixe "clf__" pour passer les paramètres directement au constructeur
+
     best_clf_params = {k.replace("clf__", ""): v for k, v in best_params_raw.items()}
 
     print(f"\n  Best CV F1-macro : {best_cv_score}", flush=True)
     print(f"  Best params      : {best_clf_params}", flush=True)
     print(f"  Search time      : {search_time:.1f}s", flush=True)
 
+    # Refit on full X_train with best params 
     print(f"\n→ Refitting {label} on full train set ({len(X_train):,} rows) …", flush=True)
     best_clf  = base_clf.__class__(**{**base_clf.get_params(), **best_clf_params})
     best_pipe = Pipeline([("pre", build_preprocessor()), ("clf", best_clf)])
@@ -101,12 +110,14 @@ def tune_model(
     best_pipe.fit(X_train, y_train)
     fit_time = time.perf_counter() - t1
 
+    # Evaluate on test set
     y_pred  = best_pipe.predict(X_test)
     f1_test = round(f1_score(y_test, y_pred, average="macro"), 4)
 
     print(f"  Test F1-macro    : {f1_test}", flush=True)
     print(f"  Refit time       : {fit_time:.1f}s", flush=True)
 
+    # Save tuned pipeline
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = MODELS_DIR / f"{save_key}_tuned.joblib"
     joblib.dump(best_pipe, out_path)
@@ -122,6 +133,8 @@ def tune_model(
     }
 
 
+# Main 
+
 def main() -> None:
     _header("Loading and cleaning data")
     X, y = load_and_clean(RAW_PATH, nrows=SAMPLE_SIZE)
@@ -133,10 +146,11 @@ def main() -> None:
 
     results: list[dict] = []
 
+    # 1. Random Forest 
     _header("Tuning Random Forest")
     rf_base = RandomForestClassifier(
         class_weight="balanced",
-        n_jobs=1,                  # n_jobs=-1 déclenche un SIGURG sur macOS sandbox
+        n_jobs=1,                  # n_jobs=1 to avoid macOS SIGURG
         random_state=RANDOM_STATE,
     )
     rf_result = tune_model(
@@ -150,6 +164,7 @@ def main() -> None:
     )
     results.append(rf_result)
 
+    # Comparison vs default RF 
     delta = round(rf_result["test_f1"] - DEFAULT_RF_F1, 4)
     sign  = "+" if delta >= 0 else ""
     print(f"\n  Default RF F1-macro : {DEFAULT_RF_F1}", flush=True)
@@ -157,6 +172,7 @@ def main() -> None:
     verdict = "AMÉLIORE" if delta > 0 else ("ÉGAL" if delta == 0 else "DÉGRADE")
     print(f"  Δ = {sign}{delta}  → tuning {verdict} le Random Forest", flush=True)
 
+    # 2. Gradient Boosting
     _header("Tuning Gradient Boosting")
     gb_base = GradientBoostingClassifier(random_state=RANDOM_STATE)
     gb_result = tune_model(
@@ -170,6 +186,7 @@ def main() -> None:
     )
     results.append(gb_result)
 
+    # Summary
     _header("Summary")
     print(f"{'Model':<32} {'CV F1':>8} {'Test F1':>9} {'Search(s)':>10} {'Refit(s)':>9}", flush=True)
     print("─" * 72, flush=True)
@@ -180,6 +197,7 @@ def main() -> None:
             flush=True,
         )
 
+    # Save CSV
     out_csv = MODELS_DIR / "tuning_results.csv"
     pd.DataFrame(results).to_csv(out_csv, index=False)
     print(f"\nTuning results saved → {out_csv}", flush=True)
