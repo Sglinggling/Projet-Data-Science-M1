@@ -20,7 +20,7 @@ import requests
 import streamlit as st
 from sklearn.metrics import confusion_matrix
 
-from src.config import GRADE_ORDER, INT_TO_LABEL, LABEL_TO_INT, MODELS_DIR, NUM_FEATURES, RAW_DIR
+from src.config import GRADE_ORDER, INT_TO_LABEL, LABEL_TO_INT, MODELS_DIR, NUM_FEATURES, RAW_DIR, SAMPLE_SIZE
 
 # Paths
 FIGURES_DIR = _ROOT / "notebooks" / "figures"
@@ -78,11 +78,11 @@ N_CLASSES   = 5
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
-# Paramètres Plotly communs pour le thème sombre
+# Paramètres Plotly communs pour le thème clair
 _PLOT_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#e8eaf0"),
+    font=dict(color="#262730"),
 )
 
 
@@ -93,11 +93,12 @@ def _load_comparison() -> pd.DataFrame | None:
     return pd.read_csv(p)
 
 
-@st.cache_data(show_spinner="Chargement de l'échantillon de données …")
-def _load_sample(nrows: int = 15_000) -> pd.DataFrame:
-    """Charge ~10 k lignes nettoyées pour les graphiques interactifs.
+@st.cache_data(show_spinner="Chargement du dataset (61 907 produits) …")
+def _load_sample(nrows: int = SAMPLE_SIZE) -> pd.DataFrame:
+    """Charge le dataset complet nettoyé (61 907 produits) pour les graphiques.
 
-    On demande 15 k lignes brutes pour compenser celles supprimées lors du nettoyage.
+    nrows=SAMPLE_SIZE (80 000 lignes brutes) est le même paramètre que pour l'entraînement,
+    ce qui donne exactement 61 907 produits après nettoyage.
     """
     from src.preprocessing import load_and_clean
     raw_path = RAW_DIR / "en.openfoodfacts.org.products.csv"
@@ -106,6 +107,22 @@ def _load_sample(nrows: int = 15_000) -> pd.DataFrame:
     df["grade"] = y.map(INT_TO_LABEL).str.upper()
     df = df.dropna(subset=["grade"])
     return df.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner="Calcul de la matrice de confusion …")
+def _compute_cm(_pipeline, model_key: str) -> np.ndarray:
+    """Calcule la matrice de confusion normalisée sur le dataset complet.
+
+    Le préfixe _ sur _pipeline exclut le pipeline du hash de cache (non sérialisable) ;
+    model_key sert de discriminant de cache.
+    """
+    df_src = _load_sample()
+    X_cm = df_src[NUM_FEATURES]
+    y_true = df_src["grade"].str.lower().map(LABEL_TO_INT)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        y_pred = _pipeline.predict(X_cm)
+    return confusion_matrix(y_true, y_pred, normalize="true")
 
 
 @st.cache_resource(show_spinner="Chargement du modèle …")
@@ -231,7 +248,7 @@ st.markdown(
     .block-container { padding-top: 2rem; }
 
     .kpi-card {
-        background: #1a1f2e;
+        background: #F0F2F6;
         border: 1px solid #2E7D32;
         border-radius: 10px;
         padding: 1.2rem 1rem;
@@ -241,7 +258,7 @@ st.markdown(
     .kpi-label {
         margin: 0;
         font-size: 0.72rem;
-        color: #9e9e9e;
+        color: #757575;
         text-transform: uppercase;
         letter-spacing: 0.09em;
     }
@@ -249,18 +266,18 @@ st.markdown(
         margin: 0.35rem 0 0;
         font-size: 1.75rem;
         font-weight: 700;
-        color: #e8eaf0;
+        color: #262730;
         line-height: 1.1;
     }
     .kpi-delta {
         margin: 0.2rem 0 0;
         font-size: 0.82rem;
-        color: #66bb6a;
+        color: #2E7D32;
     }
 
     .result-card {
-        background: #1a1f2e;
-        border: 1px solid #333;
+        background: #F0F2F6;
+        border: 1px solid #E0E0E0;
         border-radius: 14px;
         padding: 2rem 2.5rem;
         display: inline-block;
@@ -270,7 +287,7 @@ st.markdown(
     .app-footer {
         margin-top: 3rem;
         padding-top: 1rem;
-        border-top: 1px solid #2a2a3a;
+        border-top: 1px solid #E0E0E0;
         text-align: center;
         font-size: 0.78rem;
         color: #6b7280;
@@ -319,6 +336,7 @@ with tab1:
         best_f1 = best_row["f1_macro"]
 
     _n_fmt = f"{N_PRODUCTS:,}".replace(",", " ")
+    _f1_pct = f"{best_f1:.1%}".replace(".", ",")
     k1, k2, k3, k4 = st.columns(4)
     k1.markdown(
         f'<div class="kpi-card">'
@@ -337,16 +355,23 @@ with tab1:
     )
     k3.markdown(
         f'<div class="kpi-card">'
-        f'<p class="kpi-label">Meilleur modèle</p>'
+        f'<p class="kpi-label">Modèle utilisé</p>'
         f'<p class="kpi-value" style="font-size:1.2rem;">{best_model}</p>'
         f'</div>',
         unsafe_allow_html=True,
     )
     k4.markdown(
         f'<div class="kpi-card">'
-        f'<p class="kpi-label">F1-macro (test set)</p>'
-        f'<p class="kpi-value">{best_f1:.4f}</p>'
+        f'<p class="kpi-label">Fiabilité du modèle</p>'
+        f'<p class="kpi-value">{_f1_pct}</p>'
         f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<p style="text-align:center; color:#9e9e9e; font-size:0.78rem; margin-top:0.6rem;">'
+        'Détails techniques disponibles dans l\'onglet Comparaison des modèles'
+        '</p>',
         unsafe_allow_html=True,
     )
 
@@ -367,7 +392,7 @@ with tab1:
         color="Nutri-Score",
         color_discrete_map={g.upper(): c for g, c in GRADE_COLORS.items()},
         text="Produits",
-        title="Répartition des grades (échantillon ~10 k produits)",
+        title=f"Répartition des grades (dataset complet — {N_PRODUCTS:,} produits)".replace(",", " "),
     )
     fig_dist.update_traces(textposition="outside")
     fig_dist.update_layout(showlegend=False, height=380, **_PLOT_LAYOUT)
@@ -452,7 +477,7 @@ with tab3:
                 "Précision macro": "{:.4f}",
                 "Recall macro":    "{:.4f}",
                 "F1-macro":        "{:.4f}",
-            }).highlight_max(subset=["F1-macro"], color="#1a3a1a"),
+            }).highlight_max(subset=["F1-macro"], color="#c8e6c9"),
             use_container_width=True,
             hide_index=True,
         )
@@ -499,17 +524,12 @@ with tab3:
     st.subheader("Matrice de confusion — Random Forest")
     st.markdown(
         "Normalisée par ligne (rappel par classe). "
-        "Calculée sur l'échantillon dashboard (~10 k produits)."
+        "Calculée sur le dataset complet (61 907 produits)."
     )
     rf_pipe = _load_sklearn_pipeline("random_forest")
     df_cm_src = _load_sample()
     if rf_pipe is not None and not df_cm_src.empty:
-        X_cm = df_cm_src[NUM_FEATURES]
-        y_true_cm = df_cm_src["grade"].str.lower().map(LABEL_TO_INT)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            y_pred_cm = rf_pipe.predict(X_cm)
-        cm_norm = confusion_matrix(y_true_cm, y_pred_cm, normalize="true")
+        cm_norm = _compute_cm(rf_pipe, "random_forest")
         labels_up = [g.upper() for g in GRADE_ORDER]
         fig_cm = px.imshow(
             np.round(cm_norm, 3),
