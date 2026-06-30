@@ -506,7 +506,7 @@ _mode_col, _spacer_col = st.columns([3, 5])
 with _mode_col:
     _mode_choice = st.radio(
         label="Mode d'affichage",
-        options=["🏭  Vue Métier", "🔬  Vue Technique / Data Scientist"],
+        options=["🏭 Vue Métier", "🔬 Vue Technique / Data Scientist"],
         horizontal=True,
         label_visibility="collapsed",
         key="mode_selector",
@@ -534,7 +534,7 @@ _f1_pct = f"{best_f1:.1%}".replace(".", ",")
 # ══════════════════════════════════════════════════════════════════════════════
 
 if is_metier:
-    tab_acc, tab_sim = st.tabs(["🏠  Accueil", "🎯  Simulation"])
+    tab_acc, tab_sim = st.tabs(["Accueil", "Simulation"])
 
     # ── Onglet Accueil ────────────────────────────────────────────────────────
     with tab_acc:
