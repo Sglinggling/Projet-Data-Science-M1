@@ -402,7 +402,7 @@ st.markdown(
         letter-spacing: 0.02em;
         padding: 0.5rem 1.2rem;
     }
-    .block-container { padding-top: 1.5rem; }
+    .block-container { padding-top: 3.5rem; }
 
     /* Sélecteur de mode — radio horizontal sans label */
     .mode-selector-container {
@@ -497,22 +497,22 @@ st.markdown(
 )
 
 
-# ─── Sélecteur de mode (persistant via session_state) ─────────────────────────
+# ─── Sélecteur de mode ────────────────────────────────────────────────────────
 
-if "mode" not in st.session_state:
-    st.session_state.mode = "metier"
+_MODE_METIER = "Vue Métier"
+_MODE_TECH   = "Vue Technique / Data Scientist"
 
-_mode_col, _spacer_col = st.columns([3, 5])
-with _mode_col:
-    _mode_choice = st.radio(
+_, _sel_col, _ = st.columns([1, 2, 1])
+with _sel_col:
+    _mode_choice = st.segmented_control(
         label="Mode d'affichage",
-        options=["🏭 Vue Métier", "🔬 Vue Technique / Data Scientist"],
-        horizontal=True,
+        options=[_MODE_METIER, _MODE_TECH],
+        default=_MODE_METIER,
         label_visibility="collapsed",
         key="mode_selector",
     )
 
-is_metier = _mode_choice.startswith("🏭")
+is_metier = (_mode_choice is None) or (_mode_choice == _MODE_METIER)
 
 
 # ─── Données communes (chargées une seule fois, cachées) ──────────────────────
