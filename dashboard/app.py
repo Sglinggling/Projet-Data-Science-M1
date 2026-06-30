@@ -404,12 +404,9 @@ st.markdown(
     }
     .block-container { padding-top: 3.5rem; }
 
-    /* Sélecteur de mode — radio horizontal sans label */
-    .mode-selector-container {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        margin-bottom: 0.5rem;
+    /* Centre le sélecteur de mode (segmented_control) sur toute la largeur */
+    div[data-testid="stSegmentedControl"] {
+        justify-content: center;
     }
 
     .kpi-card {
@@ -502,15 +499,13 @@ st.markdown(
 _MODE_METIER = "Vue Métier"
 _MODE_TECH   = "Vue Technique / Data Scientist"
 
-_, _sel_col, _ = st.columns([1, 2, 1])
-with _sel_col:
-    _mode_choice = st.segmented_control(
-        label="Mode d'affichage",
-        options=[_MODE_METIER, _MODE_TECH],
-        default=_MODE_METIER,
-        label_visibility="collapsed",
-        key="mode_selector",
-    )
+_mode_choice = st.segmented_control(
+    label="Mode d'affichage",
+    options=[_MODE_METIER, _MODE_TECH],
+    default=_MODE_METIER,
+    label_visibility="collapsed",
+    key="mode_selector",
+)
 
 is_metier = (_mode_choice is None) or (_mode_choice == _MODE_METIER)
 
