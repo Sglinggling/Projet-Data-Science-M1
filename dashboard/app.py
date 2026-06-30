@@ -86,6 +86,8 @@ _PLOT_LAYOUT = dict(
 )
 
 
+# ─── Fonctions de chargement et calcul (toutes cachées) ───────────────────────
+
 def _load_comparison() -> pd.DataFrame | None:
     p = MODELS_DIR / "comparison_results.csv"
     if not p.exists():
@@ -95,10 +97,9 @@ def _load_comparison() -> pd.DataFrame | None:
 
 @st.cache_data(show_spinner="Chargement du dataset (61 907 produits) …")
 def _load_sample(nrows: int = SAMPLE_SIZE) -> pd.DataFrame:
-    """Charge le dataset complet nettoyé (61 907 produits) pour les graphiques.
+    """Charge le dataset complet nettoyé (61 907 produits) pour les graphiques EDA.
 
-    nrows=SAMPLE_SIZE (80 000 lignes brutes) est le même paramètre que pour l'entraînement,
-    ce qui donne exactement 61 907 produits après nettoyage.
+    nrows=SAMPLE_SIZE (80 000 lignes brutes) → identique au jeu d'entraînement.
     """
     from src.preprocessing import load_and_clean
     raw_path = RAW_DIR / "en.openfoodfacts.org.products.csv"
@@ -109,20 +110,33 @@ def _load_sample(nrows: int = SAMPLE_SIZE) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+@st.cache_data(show_spinner="Préparation du test set …")
+def _get_test_set() -> tuple[pd.DataFrame, pd.Series]:
+    """Retourne le test set isolé (20%, random_state=42) — identique à evaluate_models.py.
+
+    Reproduit exactement load_and_clean(nrows=SAMPLE_SIZE) + get_train_test() pour garantir
+    que la matrice de confusion du dashboard est calculée sur les mêmes données que le rapport.
+    """
+    from src.preprocessing import get_train_test
+    df = _load_sample()
+    X = df[NUM_FEATURES]
+    y = df["grade"].str.lower().map(LABEL_TO_INT)
+    _, X_test, _, y_test = get_train_test(X, y)
+    return X_test.reset_index(drop=True), y_test.reset_index(drop=True)
+
+
 @st.cache_data(show_spinner="Calcul de la matrice de confusion …")
 def _compute_cm(_pipeline, model_key: str) -> np.ndarray:
-    """Calcule la matrice de confusion normalisée sur le dataset complet.
+    """Matrice de confusion normalisée calculée UNIQUEMENT sur le test set (jamais vu à l'entraînement).
 
     Le préfixe _ sur _pipeline exclut le pipeline du hash de cache (non sérialisable) ;
     model_key sert de discriminant de cache.
     """
-    df_src = _load_sample()
-    X_cm = df_src[NUM_FEATURES]
-    y_true = df_src["grade"].str.lower().map(LABEL_TO_INT)
+    X_test, y_test = _get_test_set()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        y_pred = _pipeline.predict(X_cm)
-    return confusion_matrix(y_true, y_pred, normalize="true")
+        y_pred = _pipeline.predict(X_test)
+    return confusion_matrix(y_test, y_pred, normalize="true")
 
 
 @st.cache_resource(show_spinner="Chargement du modèle …")
@@ -150,6 +164,8 @@ def _api_health() -> bool:
     except Exception:
         return False
 
+
+# ─── Rendu de la prédiction (inchangé) ────────────────────────────────────────
 
 def _render_prediction_result(
     pred_letter: str,
@@ -231,379 +247,10 @@ def _render_prediction_result(
     st.plotly_chart(fig_proba, use_container_width=True)
 
 
-st.set_page_config(
-    page_title="Nutri-Score Classifier",
-    page_icon="🥗",
-    layout="wide",
-)
+# ─── Onglet Simulation (partagé entre les deux modes) ─────────────────────────
 
-st.markdown(
-    """
-    <style>
-    [data-testid="stTabs"] button {
-        font-weight: 500;
-        letter-spacing: 0.02em;
-        padding: 0.5rem 1.2rem;
-    }
-    .block-container { padding-top: 2rem; }
-
-    .kpi-card {
-        background: #F0F2F6;
-        border: 1px solid #2E7D32;
-        border-radius: 10px;
-        padding: 1.2rem 1rem;
-        text-align: center;
-        height: 100%;
-    }
-    .kpi-label {
-        margin: 0;
-        font-size: 0.72rem;
-        color: #757575;
-        text-transform: uppercase;
-        letter-spacing: 0.09em;
-    }
-    .kpi-value {
-        margin: 0.35rem 0 0;
-        font-size: 1.75rem;
-        font-weight: 700;
-        color: #262730;
-        line-height: 1.1;
-    }
-    .kpi-delta {
-        margin: 0.2rem 0 0;
-        font-size: 0.82rem;
-        color: #2E7D32;
-    }
-
-    .result-card {
-        background: #F0F2F6;
-        border: 1px solid #E0E0E0;
-        border-radius: 14px;
-        padding: 2rem 2.5rem;
-        display: inline-block;
-        min-width: 280px;
-    }
-
-    .app-footer {
-        margin-top: 3rem;
-        padding-top: 1rem;
-        border-top: 1px solid #E0E0E0;
-        text-align: center;
-        font-size: 0.78rem;
-        color: #6b7280;
-        letter-spacing: 0.04em;
-    }
-
-    /* Centre les images SHAP à largeur fixe */
-    .shap-img { display: block; margin: 0 auto; max-width: 700px; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Vue générale",
-    "Analyse des données",
-    "Comparaison des modèles",
-    "Simulation",
-])
-
-
-
-# TAB 1 — Vue générale
-
-with tab1:
-    st.title("Nutri-Score Classifier — Open Food Facts")
-    st.markdown(
-        """
-        > Un fabricant qui conçoit un nouveau produit alimentaire
-        > doit anticiper son Nutri-Score **avant** la mise en marché.
-        > Ce tableau de bord prédit le Nutri-Score (A → E) à partir des **8 valeurs
-        > nutritionnelles pour 100 g** déclarées sur l'étiquette, en s'appuyant sur
-        > des modèles entraînés sur **61 907 produits Open Food Facts**.
-        > Aucun réentraînement : tout est pré-calculé, la prédiction est instantanée.
-        """
-    )
-
-    st.divider()
-
-    df_cmp = _load_comparison()
-    best_model = "Random Forest"
-    best_f1 = 0.9587
-    if df_cmp is not None and not df_cmp.empty:
-        best_row = df_cmp.sort_values("f1_macro", ascending=False).iloc[0]
-        best_model = best_row["model"]
-        best_f1 = best_row["f1_macro"]
-
-    _n_fmt = f"{N_PRODUCTS:,}".replace(",", " ")
-    _f1_pct = f"{best_f1:.1%}".replace(".", ",")
-    k1, k2, k3, k4 = st.columns(4)
-    k1.markdown(
-        f'<div class="kpi-card">'
-        f'<p class="kpi-label">Produits (dataset nettoyé)</p>'
-        f'<p class="kpi-value">{_n_fmt}</p>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    k2.markdown(
-        '<div class="kpi-card">'
-        '<p class="kpi-label">Classes Nutri-Score</p>'
-        '<p class="kpi-value">5</p>'
-        '<p class="kpi-delta">A → E</p>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-    k3.markdown(
-        f'<div class="kpi-card">'
-        f'<p class="kpi-label">Modèle utilisé</p>'
-        f'<p class="kpi-value" style="font-size:1.2rem;">{best_model}</p>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    k4.markdown(
-        f'<div class="kpi-card">'
-        f'<p class="kpi-label">Fiabilité du modèle</p>'
-        f'<p class="kpi-value">{_f1_pct}</p>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<p style="text-align:center; color:#9e9e9e; font-size:0.78rem; margin-top:0.6rem;">'
-        'Détails techniques disponibles dans l\'onglet Comparaison des modèles'
-        '</p>',
-        unsafe_allow_html=True,
-    )
-
-    st.divider()
-
-    st.subheader("Distribution des Nutri-Scores dans le dataset")
-    df_s1 = _load_sample()
-    grade_counts = (
-        df_s1["grade"]
-        .value_counts()
-        .reindex([g.upper() for g in GRADE_ORDER])
-        .reset_index()
-    )
-    grade_counts.columns = ["Nutri-Score", "Produits"]
-    fig_dist = px.bar(
-        grade_counts,
-        x="Nutri-Score", y="Produits",
-        color="Nutri-Score",
-        color_discrete_map={g.upper(): c for g, c in GRADE_COLORS.items()},
-        text="Produits",
-        title=f"Répartition des grades (dataset complet — {N_PRODUCTS:,} produits)".replace(",", " "),
-    )
-    fig_dist.update_traces(textposition="outside")
-    fig_dist.update_layout(showlegend=False, height=380, **_PLOT_LAYOUT)
-    st.plotly_chart(fig_dist, use_container_width=True)
-
-
-# TAB 2 — Analyse des données (graphiques Plotly interactifs)
-
-with tab2:
-    st.header("Analyse exploratoire des données")
-    df_eda = _load_sample()
-
-    st.subheader("Distribution d'un nutriment par grade Nutri-Score")
-    st.markdown(
-        "Chaque nutriment montre un gradient clair A → E. "
-        "Sélectionnez un nutriment pour explorer la distribution par grade."
-    )
-    sel_feat = st.selectbox(
-        "Nutriment à afficher",
-        options=NUM_FEATURES,
-        format_func=lambda f: FEATURE_LABELS[f],
-        key="sel_feat",
-    )
-    fig_box1 = px.box(
-        df_eda.dropna(subset=[sel_feat]),
-        x="grade", y=sel_feat,
-        color="grade",
-        color_discrete_map={g.upper(): c for g, c in GRADE_COLORS.items()},
-        category_orders={"grade": [g.upper() for g in GRADE_ORDER]},
-        points=False,
-        labels={sel_feat: FEATURE_LABELS[sel_feat], "grade": "Nutri-Score"},
-        title=f"Distribution de {FEATURE_LABELS[sel_feat]} par grade Nutri-Score",
-    )
-    fig_box1.update_layout(showlegend=False, height=420, **_PLOT_LAYOUT)
-    st.plotly_chart(fig_box1, use_container_width=True)
-
-    st.divider()
-
-    st.subheader("Carte de corrélation des nutriments")
-    st.markdown(
-        "Sucres et glucides sont fortement corrélés (r > 0.7). "
-        "Sel et graisses saturées sont des prédicteurs indépendants."
-    )
-    corr = df_eda[NUM_FEATURES].corr().round(2)
-    short_labels = [FEATURE_LABELS[f].split(" (")[0] for f in NUM_FEATURES]
-    fig_corr = px.imshow(
-        corr,
-        x=short_labels, y=short_labels,
-        color_continuous_scale="RdBu_r",
-        zmin=-1, zmax=1,
-        text_auto=True,
-        title="Corrélation de Pearson — nutriments (100 g)",
-        aspect="auto",
-    )
-    fig_corr.update_layout(height=500, **_PLOT_LAYOUT)
-    st.plotly_chart(fig_corr, use_container_width=True)
-
-
-
-# TAB 3 — Comparaison des modèles
-
-with tab3:
-    st.header("Comparaison des modèles entraînés")
-
-    st.subheader("Métriques sur le test set (trié par F1-macro ↓)")
-    if df_cmp is not None:
-        df_styled = (
-            df_cmp
-            .sort_values("f1_macro", ascending=False)
-            .reset_index(drop=True)
-            .rename(columns={
-                "model":           "Modèle",
-                "accuracy":        "Accuracy",
-                "precision_macro": "Précision macro",
-                "recall_macro":    "Recall macro",
-                "f1_macro":        "F1-macro",
-            })
-        )
-        st.dataframe(
-            df_styled.style.format({
-                "Accuracy":        "{:.4f}",
-                "Précision macro": "{:.4f}",
-                "Recall macro":    "{:.4f}",
-                "F1-macro":        "{:.4f}",
-            }).highlight_max(subset=["F1-macro"], color="#c8e6c9"),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.warning("Fichier `models/comparison_results.csv` introuvable.")
-
-    st.divider()
-
-    st.subheader("Comparaison des performances — 4 métriques × modèles")
-    if df_cmp is not None:
-        metrics = ["accuracy", "precision_macro", "recall_macro", "f1_macro"]
-        metric_labels = {
-            "accuracy":        "Accuracy",
-            "precision_macro": "Précision macro",
-            "recall_macro":    "Recall macro",
-            "f1_macro":        "F1-macro",
-        }
-        df_melt = df_cmp.melt(
-            id_vars="model",
-            value_vars=metrics,
-            var_name="Métrique",
-            value_name="Score",
-        )
-        df_melt["Métrique"] = df_melt["Métrique"].map(metric_labels)
-
-        fig_cmp = px.bar(
-            df_melt,
-            x="model", y="Score",
-            color="Métrique",
-            barmode="group",
-            text=df_melt["Score"].map("{:.3f}".format),
-            title="Métriques par modèle (test set)",
-            labels={"model": "Modèle"},
-            range_y=[0.85, 1.0],
-        )
-        fig_cmp.update_traces(textposition="outside", textfont_size=10)
-        fig_cmp.update_layout(height=460, legend_title_text="Métrique", **_PLOT_LAYOUT)
-        st.plotly_chart(fig_cmp, use_container_width=True)
-    else:
-        st.info("CSV de comparaison introuvable — tableau ci-dessus uniquement.")
-
-    st.divider()
-
-    st.subheader("Matrice de confusion — Random Forest")
-    st.markdown(
-        "Normalisée par ligne (rappel par classe). "
-        "Calculée sur le dataset complet (61 907 produits)."
-    )
-    rf_pipe = _load_sklearn_pipeline("random_forest")
-    df_cm_src = _load_sample()
-    if rf_pipe is not None and not df_cm_src.empty:
-        cm_norm = _compute_cm(rf_pipe, "random_forest")
-        labels_up = [g.upper() for g in GRADE_ORDER]
-        fig_cm = px.imshow(
-            np.round(cm_norm, 3),
-            x=labels_up, y=labels_up,
-            color_continuous_scale="Greens",
-            zmin=0, zmax=1,
-            text_auto=".2f",
-            labels={"x": "Prédit", "y": "Réel"},
-            title="Confusion matrix normalisée — Random Forest",
-            aspect="auto",
-        )
-        fig_cm.update_layout(height=440, **_PLOT_LAYOUT)
-        st.plotly_chart(fig_cm, use_container_width=True)
-    else:
-        st.warning("Modèle Random Forest ou données introuvables.")
-
-    st.divider()
-
-    st.subheader("Interprétabilité — importance des nutriments")
-
-    col_fi, col_shap = st.columns([1, 1])
-
-    with col_fi:
-        st.markdown("**Importance native RF** (Gini, barplot interactif)")
-        if rf_pipe is not None:
-            importances = rf_pipe.named_steps["clf"].feature_importances_
-            df_fi = pd.DataFrame({
-                "Nutriment": [FEATURE_LABELS[f].split(" (")[0] for f in NUM_FEATURES],
-                "Importance": importances,
-            }).sort_values("Importance")
-            fig_fi = px.bar(
-                df_fi,
-                x="Importance", y="Nutriment",
-                orientation="h",
-                text=df_fi["Importance"].map("{:.3f}".format),
-                color="Importance",
-                color_continuous_scale="Greens",
-                title="Feature importance (Random Forest)",
-            )
-            fig_fi.update_traces(textposition="outside")
-            fig_fi.update_layout(
-                showlegend=False,
-                coloraxis_showscale=False,
-                height=400,
-                **_PLOT_LAYOUT,
-            )
-            st.plotly_chart(fig_fi, use_container_width=True)
-        else:
-            st.warning("Modèle Random Forest introuvable.")
-
-    with col_shap:
-        st.markdown("**SHAP beeswarm** (2 000 échantillons, toutes classes)")
-        shap_path = FIGURES_DIR / "shap_summary.png"
-        if shap_path.exists():
-            # Encodage base64 pour afficher l'image sans serveur de fichiers statiques
-            st.markdown(
-                f'<div style="text-align:center;">'
-                f'<img src="data:image/png;base64,{__import__("base64").b64encode(shap_path.read_bytes()).decode()}"'
-                f' style="max-width:680px; width:100%; border-radius:8px;">'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.warning("Image SHAP manquante.")
-
-    st.info(
-        "**Consensus Gini + SHAP** : "
-        "**Sel · Graisses saturées · Sucres** sont les nutriments les plus influents — "
-        "cohérent avec l'algorithme officiel Santé Publique France."
-    )
-
-# TAB 4 — Simulation  (logique inchangée)
-
-with tab4:
+def _render_simulation_tab() -> None:
+    """Contenu de l'onglet Simulation — identique dans Vue Métier et Vue Technique."""
     st.header("Simulation — prédire le Nutri-Score d'un produit")
 
     api_ok = _api_health()
@@ -666,8 +313,8 @@ with tab4:
             "_Mode API — le modèle **Random Forest** est utilisé "
             "(seul modèle exposé par l'API)._"
         )
-        model_choice  = "Random Forest"
-        model_key     = SKLEARN_MODELS[model_choice]
+        model_choice = "Random Forest"
+        model_key    = SKLEARN_MODELS[model_choice]
     else:
         model_choice = st.selectbox(
             "Choisir un modèle (mode local)",
@@ -737,6 +384,501 @@ with tab4:
                         pred_letter, confidence, probabilities,
                         model_label=f"{model_choice} (mode local)",
                     )
+
+
+# ─── Configuration Streamlit ───────────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="Nutri-Score Classifier",
+    page_icon="🥗",
+    layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stTabs"] button {
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        padding: 0.5rem 1.2rem;
+    }
+    .block-container { padding-top: 1.5rem; }
+
+    /* Sélecteur de mode — radio horizontal sans label */
+    .mode-selector-container {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .kpi-card {
+        background: #F0F2F6;
+        border: 1px solid #2E7D32;
+        border-radius: 10px;
+        padding: 1.2rem 1rem;
+        text-align: center;
+        height: 100%;
+    }
+    .kpi-label {
+        margin: 0;
+        font-size: 0.72rem;
+        color: #757575;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+    }
+    .kpi-value {
+        margin: 0.35rem 0 0;
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #262730;
+        line-height: 1.1;
+    }
+    .kpi-delta {
+        margin: 0.2rem 0 0;
+        font-size: 0.82rem;
+        color: #2E7D32;
+    }
+
+    /* KPI héros (Vue Métier — un seul grand KPI centré) */
+    .kpi-hero {
+        background: #F0F2F6;
+        border: 2px solid #2E7D32;
+        border-radius: 14px;
+        padding: 2rem 2rem;
+        text-align: center;
+        max-width: 340px;
+        margin: 0 auto;
+    }
+    .kpi-hero-label {
+        margin: 0;
+        font-size: 0.8rem;
+        color: #757575;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }
+    .kpi-hero-value {
+        margin: 0.4rem 0 0;
+        font-size: 3rem;
+        font-weight: 800;
+        color: #2E7D32;
+        line-height: 1.05;
+    }
+    .kpi-hero-sub {
+        margin: 0.3rem 0 0;
+        font-size: 0.85rem;
+        color: #757575;
+    }
+
+    .result-card {
+        background: #F0F2F6;
+        border: 1px solid #E0E0E0;
+        border-radius: 14px;
+        padding: 2rem 2.5rem;
+        display: inline-block;
+        min-width: 280px;
+    }
+
+    .app-footer {
+        margin-top: 3rem;
+        padding-top: 1rem;
+        border-top: 1px solid #E0E0E0;
+        text-align: center;
+        font-size: 0.78rem;
+        color: #6b7280;
+        letter-spacing: 0.04em;
+    }
+
+    /* Centre les images SHAP à largeur fixe */
+    .shap-img { display: block; margin: 0 auto; max-width: 700px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ─── Sélecteur de mode (persistant via session_state) ─────────────────────────
+
+if "mode" not in st.session_state:
+    st.session_state.mode = "metier"
+
+_mode_col, _spacer_col = st.columns([3, 5])
+with _mode_col:
+    _mode_choice = st.radio(
+        label="Mode d'affichage",
+        options=["🏭  Vue Métier", "🔬  Vue Technique / Data Scientist"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="mode_selector",
+    )
+
+is_metier = _mode_choice.startswith("🏭")
+
+
+# ─── Données communes (chargées une seule fois, cachées) ──────────────────────
+
+df_cmp    = _load_comparison()
+best_model = "Random Forest"
+best_f1    = 0.9587
+if df_cmp is not None and not df_cmp.empty:
+    best_row   = df_cmp.sort_values("f1_macro", ascending=False).iloc[0]
+    best_model = best_row["model"]
+    best_f1    = best_row["f1_macro"]
+
+_n_fmt  = f"{N_PRODUCTS:,}".replace(",", " ")
+_f1_pct = f"{best_f1:.1%}".replace(".", ",")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODE : VUE MÉTIER  (2 onglets — Accueil + Simulation)
+# ══════════════════════════════════════════════════════════════════════════════
+
+if is_metier:
+    tab_acc, tab_sim = st.tabs(["🏠  Accueil", "🎯  Simulation"])
+
+    # ── Onglet Accueil ────────────────────────────────────────────────────────
+    with tab_acc:
+        st.title("Nutri-Score Classifier")
+        st.markdown(
+            """
+            Un fabricant qui conçoit un nouveau produit alimentaire
+            doit anticiper son **Nutri-Score avant la mise en marché**.
+            Saisissez les 8 valeurs nutritionnelles de votre recette (pour 100 g)
+            dans l'onglet **Simulation** : vous obtenez une prédiction instantanée,
+            A à E, avec le niveau de confiance associé.
+            """
+        )
+
+        st.divider()
+
+        # KPI héros — un seul indicateur clé pour le décideur métier
+        st.markdown(
+            f'<div class="kpi-hero">'
+            f'<p class="kpi-hero-label">Fiabilité du modèle</p>'
+            f'<p class="kpi-hero-value">{_f1_pct}</p>'
+            f'<p class="kpi-hero-sub">{best_model} — entraîné sur {_n_fmt} produits</p>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        st.subheader("Répartition des Nutri-Scores dans la base de données")
+        st.markdown(
+            "Sur 61 907 produits analysés, la distribution est équilibrée entre les 5 classes. "
+            "Le modèle a appris à distinguer chacune d'elles avec une précision supérieure à 95 %."
+        )
+        df_s1 = _load_sample()
+        grade_counts = (
+            df_s1["grade"]
+            .value_counts()
+            .reindex([g.upper() for g in GRADE_ORDER])
+            .reset_index()
+        )
+        grade_counts.columns = ["Nutri-Score", "Produits"]
+        fig_dist_m = px.bar(
+            grade_counts,
+            x="Nutri-Score", y="Produits",
+            color="Nutri-Score",
+            color_discrete_map={g.upper(): c for g, c in GRADE_COLORS.items()},
+            text="Produits",
+            title=f"Répartition des grades — {_n_fmt} produits Open Food Facts",
+        )
+        fig_dist_m.update_traces(textposition="outside")
+        fig_dist_m.update_layout(showlegend=False, height=380, **_PLOT_LAYOUT)
+        st.plotly_chart(fig_dist_m, use_container_width=True)
+
+    # ── Onglet Simulation ─────────────────────────────────────────────────────
+    with tab_sim:
+        _render_simulation_tab()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODE : VUE TECHNIQUE / DATA SCIENTIST  (4 onglets)
+# ══════════════════════════════════════════════════════════════════════════════
+
+else:
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Vue générale",
+        "Analyse des données",
+        "Comparaison des modèles",
+        "Simulation",
+    ])
+
+    # ── TAB 1 — Vue générale ──────────────────────────────────────────────────
+    with tab1:
+        st.title("Nutri-Score Classifier — Open Food Facts")
+        st.markdown(
+            """
+            > Un fabricant qui conçoit un nouveau produit alimentaire
+            > doit anticiper son Nutri-Score **avant** la mise en marché.
+            > Ce tableau de bord prédit le Nutri-Score (A → E) à partir des **8 valeurs
+            > nutritionnelles pour 100 g** déclarées sur l'étiquette, en s'appuyant sur
+            > des modèles entraînés sur **61 907 produits Open Food Facts**.
+            > Aucun réentraînement : tout est pré-calculé, la prédiction est instantanée.
+            """
+        )
+
+        st.divider()
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.markdown(
+            f'<div class="kpi-card">'
+            f'<p class="kpi-label">Produits (dataset nettoyé)</p>'
+            f'<p class="kpi-value">{_n_fmt}</p>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        k2.markdown(
+            '<div class="kpi-card">'
+            '<p class="kpi-label">Classes Nutri-Score</p>'
+            '<p class="kpi-value">5</p>'
+            '<p class="kpi-delta">A → E</p>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        k3.markdown(
+            f'<div class="kpi-card">'
+            f'<p class="kpi-label">Modèle utilisé</p>'
+            f'<p class="kpi-value" style="font-size:1.2rem;">{best_model}</p>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        k4.markdown(
+            f'<div class="kpi-card">'
+            f'<p class="kpi-label">F1-macro (test set)</p>'
+            f'<p class="kpi-value">{best_f1:.4f}</p>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        st.subheader("Distribution des Nutri-Scores dans le dataset")
+        df_s1 = _load_sample()
+        grade_counts = (
+            df_s1["grade"]
+            .value_counts()
+            .reindex([g.upper() for g in GRADE_ORDER])
+            .reset_index()
+        )
+        grade_counts.columns = ["Nutri-Score", "Produits"]
+        fig_dist = px.bar(
+            grade_counts,
+            x="Nutri-Score", y="Produits",
+            color="Nutri-Score",
+            color_discrete_map={g.upper(): c for g, c in GRADE_COLORS.items()},
+            text="Produits",
+            title=f"Répartition des grades (dataset complet — {_n_fmt} produits)",
+        )
+        fig_dist.update_traces(textposition="outside")
+        fig_dist.update_layout(showlegend=False, height=380, **_PLOT_LAYOUT)
+        st.plotly_chart(fig_dist, use_container_width=True)
+
+    # ── TAB 2 — Analyse des données ───────────────────────────────────────────
+    with tab2:
+        st.header("Analyse exploratoire des données")
+        df_eda = _load_sample()
+
+        st.subheader("Distribution d'un nutriment par grade Nutri-Score")
+        st.markdown(
+            "Chaque nutriment montre un gradient clair A → E. "
+            "Sélectionnez un nutriment pour explorer la distribution par grade."
+        )
+        sel_feat = st.selectbox(
+            "Nutriment à afficher",
+            options=NUM_FEATURES,
+            format_func=lambda f: FEATURE_LABELS[f],
+            key="sel_feat",
+        )
+        fig_box1 = px.box(
+            df_eda.dropna(subset=[sel_feat]),
+            x="grade", y=sel_feat,
+            color="grade",
+            color_discrete_map={g.upper(): c for g, c in GRADE_COLORS.items()},
+            category_orders={"grade": [g.upper() for g in GRADE_ORDER]},
+            points=False,
+            labels={sel_feat: FEATURE_LABELS[sel_feat], "grade": "Nutri-Score"},
+            title=f"Distribution de {FEATURE_LABELS[sel_feat]} par grade Nutri-Score",
+        )
+        fig_box1.update_layout(showlegend=False, height=420, **_PLOT_LAYOUT)
+        st.plotly_chart(fig_box1, use_container_width=True)
+
+        st.divider()
+
+        st.subheader("Carte de corrélation des nutriments")
+        st.markdown(
+            "Sucres et glucides sont fortement corrélés (r > 0.7). "
+            "Sel et graisses saturées sont des prédicteurs indépendants."
+        )
+        corr = df_eda[NUM_FEATURES].corr().round(2)
+        short_labels = [FEATURE_LABELS[f].split(" (")[0] for f in NUM_FEATURES]
+        fig_corr = px.imshow(
+            corr,
+            x=short_labels, y=short_labels,
+            color_continuous_scale="RdBu_r",
+            zmin=-1, zmax=1,
+            text_auto=True,
+            title="Corrélation de Pearson — nutriments (100 g)",
+            aspect="auto",
+        )
+        fig_corr.update_layout(height=500, **_PLOT_LAYOUT)
+        st.plotly_chart(fig_corr, use_container_width=True)
+
+    # ── TAB 3 — Comparaison des modèles ──────────────────────────────────────
+    with tab3:
+        st.header("Comparaison des modèles entraînés")
+
+        st.subheader("Métriques sur le test set (trié par F1-macro ↓)")
+        if df_cmp is not None:
+            df_styled = (
+                df_cmp
+                .sort_values("f1_macro", ascending=False)
+                .reset_index(drop=True)
+                .rename(columns={
+                    "model":           "Modèle",
+                    "accuracy":        "Accuracy",
+                    "precision_macro": "Précision macro",
+                    "recall_macro":    "Recall macro",
+                    "f1_macro":        "F1-macro",
+                })
+            )
+            st.dataframe(
+                df_styled.style.format({
+                    "Accuracy":        "{:.4f}",
+                    "Précision macro": "{:.4f}",
+                    "Recall macro":    "{:.4f}",
+                    "F1-macro":        "{:.4f}",
+                }).highlight_max(subset=["F1-macro"], color="#c8e6c9"),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.warning("Fichier `models/comparison_results.csv` introuvable.")
+
+        st.divider()
+
+        st.subheader("Comparaison des performances — 4 métriques × modèles")
+        if df_cmp is not None:
+            metrics = ["accuracy", "precision_macro", "recall_macro", "f1_macro"]
+            metric_labels = {
+                "accuracy":        "Accuracy",
+                "precision_macro": "Précision macro",
+                "recall_macro":    "Recall macro",
+                "f1_macro":        "F1-macro",
+            }
+            df_melt = df_cmp.melt(
+                id_vars="model",
+                value_vars=metrics,
+                var_name="Métrique",
+                value_name="Score",
+            )
+            df_melt["Métrique"] = df_melt["Métrique"].map(metric_labels)
+
+            fig_cmp = px.bar(
+                df_melt,
+                x="model", y="Score",
+                color="Métrique",
+                barmode="group",
+                text=df_melt["Score"].map("{:.3f}".format),
+                title="Métriques par modèle (test set)",
+                labels={"model": "Modèle"},
+                range_y=[0.85, 1.0],
+            )
+            fig_cmp.update_traces(textposition="outside", textfont_size=10)
+            fig_cmp.update_layout(height=460, legend_title_text="Métrique", **_PLOT_LAYOUT)
+            st.plotly_chart(fig_cmp, use_container_width=True)
+        else:
+            st.info("CSV de comparaison introuvable — tableau ci-dessus uniquement.")
+
+        st.divider()
+
+        st.subheader("Matrice de confusion — Random Forest")
+        st.markdown(
+            "Normalisée par ligne (rappel par classe). "
+            "Calculée sur le **test set isolé** (20% du dataset, ~12 382 produits jamais vus à l'entraînement)."
+        )
+        rf_pipe    = _load_sklearn_pipeline("random_forest")
+        df_cm_src  = _load_sample()
+        if rf_pipe is not None and not df_cm_src.empty:
+            cm_norm   = _compute_cm(rf_pipe, "random_forest")
+            labels_up = [g.upper() for g in GRADE_ORDER]
+            fig_cm = px.imshow(
+                np.round(cm_norm, 3),
+                x=labels_up, y=labels_up,
+                color_continuous_scale="Greens",
+                zmin=0, zmax=1,
+                text_auto=".2f",
+                labels={"x": "Prédit", "y": "Réel"},
+                title="Confusion matrix normalisée — Random Forest (test set)",
+                aspect="auto",
+            )
+            fig_cm.update_layout(height=440, **_PLOT_LAYOUT)
+            st.plotly_chart(fig_cm, use_container_width=True)
+        else:
+            st.warning("Modèle Random Forest ou données introuvables.")
+
+        st.divider()
+
+        st.subheader("Interprétabilité — importance des nutriments")
+
+        col_fi, col_shap = st.columns([1, 1])
+
+        with col_fi:
+            st.markdown("**Importance native RF** (Gini, barplot interactif)")
+            if rf_pipe is not None:
+                importances = rf_pipe.named_steps["clf"].feature_importances_
+                df_fi = pd.DataFrame({
+                    "Nutriment": [FEATURE_LABELS[f].split(" (")[0] for f in NUM_FEATURES],
+                    "Importance": importances,
+                }).sort_values("Importance")
+                fig_fi = px.bar(
+                    df_fi,
+                    x="Importance", y="Nutriment",
+                    orientation="h",
+                    text=df_fi["Importance"].map("{:.3f}".format),
+                    color="Importance",
+                    color_continuous_scale="Greens",
+                    title="Feature importance (Random Forest)",
+                )
+                fig_fi.update_traces(textposition="outside")
+                fig_fi.update_layout(
+                    showlegend=False,
+                    coloraxis_showscale=False,
+                    height=400,
+                    **_PLOT_LAYOUT,
+                )
+                st.plotly_chart(fig_fi, use_container_width=True)
+            else:
+                st.warning("Modèle Random Forest introuvable.")
+
+        with col_shap:
+            st.markdown("**SHAP beeswarm** (2 000 échantillons, toutes classes)")
+            shap_path = FIGURES_DIR / "shap_summary.png"
+            if shap_path.exists():
+                # Encodage base64 pour afficher l'image sans serveur de fichiers statiques
+                st.markdown(
+                    f'<div style="text-align:center;">'
+                    f'<img src="data:image/png;base64,{__import__("base64").b64encode(shap_path.read_bytes()).decode()}"'
+                    f' style="max-width:680px; width:100%; border-radius:8px;">'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.warning("Image SHAP manquante.")
+
+        st.info(
+            "**Consensus Gini + SHAP** : "
+            "**Sel · Graisses saturées · Sucres** sont les nutriments les plus influents — "
+            "cohérent avec l'algorithme officiel Santé Publique France."
+        )
+
+    # ── TAB 4 — Simulation ────────────────────────────────────────────────────
+    with tab4:
+        _render_simulation_tab()
+
+
+# ─── Footer ───────────────────────────────────────────────────────────────────
 
 st.markdown(
     '<div class="app-footer">'
